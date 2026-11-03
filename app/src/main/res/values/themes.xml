@@ -1,9 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+        Theme.CPhone uses a NoActionBar base so Compose Scaffold controls the UI.
+        Status bar and navigation bar are made transparent so Compose can draw
+        edge-to-edge. Compose uses statusBarsPadding / navigationBarsPadding
+        to move content into the safe area — nothing gets hidden behind the notch
+        or nav bar.
+    -->
     <style name="Theme.CPhone" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:statusBarColor">#FFFFFF</item>
+        <!-- Transparent bars so Compose draws behind them -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Allow drawing into display cutout area (notch / punch-hole) -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <!-- Start with light icons; Compose SideEffect will update dynamically -->
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:navigationBarColor">#FFFFFF</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>

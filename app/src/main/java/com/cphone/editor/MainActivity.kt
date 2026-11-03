@@ -7,11 +7,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.graphics.Color
 import androidx.core.view.WindowCompat
 import com.cphone.editor.ui.CPhoneApp
 import java.io.BufferedReader
@@ -23,21 +21,24 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
 
-        // Handle opening file via Intent
+        // Edge-to-edge: our Compose layout draws behind status bar & nav bar.
+        // The Compose layer then uses statusBarsPadding / navigationBarsPadding
+        // to move content into safe areas.
+        enableEdgeToEdge()
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         handleIntent(intent)
 
         setContent {
             val settings by viewModel.settings.collectAsState()
             val isDark = settings.isDarkMode
 
+            // Keep status bar / nav bar icon colours in sync with theme
             SideEffect {
-                val window = this.window
-                val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-                // White status bar with dark icons in light mode
-                insetsController.isAppearanceLightStatusBars = !isDark
-                insetsController.isAppearanceLightNavigationBars = !isDark
+                val ctrl = WindowCompat.getInsetsController(window, window.decorView)
+                ctrl.isAppearanceLightStatusBars = !isDark
+                ctrl.isAppearanceLightNavigationBars = !isDark
             }
 
             CPhoneApp(viewModel = viewModel)
@@ -51,30 +52,22 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
-        val action = intent.action
-        val uri: Uri? = intent.data
+        val uri: Uri = intent.data ?: return
+        if (intent.action != Intent.ACTION_VIEW && intent.action != Intent.ACTION_EDIT) return
 
-        if ((Intent.ACTION_VIEW == action || Intent.ACTION_EDIT == action) && uri != null) {
-            try {
-                val contentResolver = contentResolver
-                val inputStream = contentResolver.openInputStream(uri)
-                val reader = BufferedReader(InputStreamReader(inputStream))
-                val content = reader.readText()
-                reader.close()
-                inputStream?.close()
+        try {
+            val cr = contentResolver
+            val content = cr.openInputStream(uri)?.use {
+                BufferedReader(InputStreamReader(it)).readText()
+            } ?: return
 
-                var name = uri.lastPathSegment ?: "opened_file"
-                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (nameIndex != -1 && cursor.moveToFirst()) {
-                        name = cursor.getString(nameIndex)
-                    }
-                }
-
-                viewModel.openNewTab(name, content, uri)
-            } catch (_: Exception) {
-                // Keep default on read error
+            var name = uri.lastPathSegment ?: "file"
+            cr.query(uri, null, null, null, null)?.use { c ->
+                val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (i != -1 && c.moveToFirst()) name = c.getString(i)
             }
-        }
+
+            viewModel.openNewTab(name, content, uri)
+        } catch (_: Exception) { /* keep default tab on error */ }
     }
 }

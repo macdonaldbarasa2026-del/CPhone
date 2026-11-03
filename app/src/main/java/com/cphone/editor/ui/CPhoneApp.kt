@@ -10,11 +10,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import com.cphone.editor.EditorViewModel
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CPhoneApp(
     viewModel: EditorViewModel,
@@ -43,85 +45,104 @@ fun CPhoneApp(
 
     var tabToCloseId by remember { mutableStateOf<String?>(null) }
 
-    // Open File SAF Launcher
+    // ── SAF: Open File ───────────────────────────────────────────────────────
     val openDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             try {
-                val contentResolver = context.contentResolver
-                val inputStream = contentResolver.openInputStream(uri)
-                val reader = BufferedReader(InputStreamReader(inputStream))
-                val content = reader.readText()
-                reader.close()
-                inputStream?.close()
-
-                var name = "opened_file.txt"
-                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (nameIndex != -1 && cursor.moveToFirst()) {
-                        name = cursor.getString(nameIndex)
-                    }
+                val cr = context.contentResolver
+                val content = cr.openInputStream(uri)?.bufferedReader()?.readText() ?: ""
+                var name = "file.txt"
+                cr.query(uri, null, null, null, null)?.use { c ->
+                    val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (i != -1 && c.moveToFirst()) name = c.getString(i)
                 }
-
                 viewModel.openNewTab(name, content, uri)
                 Toast.makeText(context, "Opened: $name", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                Toast.makeText(context, "Failed to open file: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Cannot open: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    // Save As SAF Launcher
-    val createDocumentLauncher = rememberLauncherForActivityResult(
+    // ── SAF: Save As ─────────────────────────────────────────────────────────
+    val saveAsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("*/*")
     ) { uri: Uri? ->
         if (uri != null) {
             try {
-                val contentResolver = context.contentResolver
-                contentResolver.openOutputStream(uri)?.use { os ->
-                    os.write(activeTab.state.text.toByteArray(Charsets.UTF_8))
+                val cr = context.contentResolver
+                cr.openOutputStream(uri)?.use { it.write(activeTab.state.text.toByteArray()) }
+                var name = activeTab.fileName
+                cr.query(uri, null, null, null, null)?.use { c ->
+                    val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (i != -1 && c.moveToFirst()) name = c.getString(i)
                 }
-                var savedName = activeTab.fileName
-                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (nameIndex != -1 && cursor.moveToFirst()) {
-                        savedName = cursor.getString(nameIndex)
-                    }
-                }
-                viewModel.markSaved(uri, savedName)
-                Toast.makeText(context, "Saved as: $savedName", Toast.LENGTH_SHORT).show()
+                viewModel.markSaved(uri, name)
+                Toast.makeText(context, "Saved: $name", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                Toast.makeText(context, "Failed to save file: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    // Direct Save Function
+    // ── Save current file ────────────────────────────────────────────────────
     fun saveCurrentFile() {
-        if (activeTab.uri != null) {
+        val tab = viewModel.currentTab
+        if (tab.uri != null) {
             try {
-                val contentResolver = context.contentResolver
-                contentResolver.openOutputStream(activeTab.uri, "wt")?.use { os ->
-                    os.write(activeTab.state.text.toByteArray(Charsets.UTF_8))
-                }
-                viewModel.markSaved(activeTab.uri, activeTab.fileName)
-                Toast.makeText(context, "Saved: ${activeTab.fileName}", Toast.LENGTH_SHORT).show()
+                context.contentResolver.openOutputStream(tab.uri, "wt")
+                    ?.use { it.write(tab.state.text.toByteArray()) }
+                viewModel.markSaved(tab.uri, tab.fileName)
+                Toast.makeText(context, "Saved ✓", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                Toast.makeText(context, "Failed to save: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
         } else {
-            createDocumentLauncher.launch(activeTab.fileName)
+            saveAsLauncher.launch(tab.fileName)
         }
     }
 
+    // ── Insert tab at cursor ─────────────────────────────────────────────────
+    fun insertTab() {
+        viewModel.insertTextAtCursor(" ".repeat(settings.tabSize))
+    }
+
+    // ── Move cursor left/right (selection update) ────────────────────────────
+    fun moveCursorLeft() {
+        val tab = viewModel.currentTab
+        val pos = (tab.state.selection.start - 1).coerceAtLeast(0)
+        viewModel.onTextChanged(tab.state.copy(selection = androidx.compose.ui.text.TextRange(pos)))
+    }
+    fun moveCursorRight() {
+        val tab = viewModel.currentTab
+        val pos = (tab.state.selection.start + 1).coerceAtMost(tab.state.text.length)
+        viewModel.onTextChanged(tab.state.copy(selection = androidx.compose.ui.text.TextRange(pos)))
+    }
+
+    // ── Theme colours ────────────────────────────────────────────────────────
+    val isDark = settings.isDarkMode
+
+    // ── Scaffold with proper WindowInsets ───────────────────────────────────
+    // contentWindowInsets = WindowInsets(0) so we handle insets manually
+    // This prevents Scaffold from double-applying padding.
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            Column {
+            // TopBar sits inside Scaffold's top slot; Scaffold automatically
+            // places it below the status bar when contentWindowInsets is handled.
+            // We add statusBarsPadding() explicitly so it always clears the notch.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()   // ← clears notch / status bar
+                    .displayCutoutPadding() // ← clears camera cutout on all sides
+            ) {
                 TopNavigationBar(
-                    fileName = if (activeTab.isModified) "${activeTab.fileName} *" else activeTab.fileName,
-                    isDarkMode = settings.isDarkMode,
+                    fileName = if (activeTab.isModified) "${activeTab.fileName} ●" else activeTab.fileName,
+                    isDarkMode = isDark,
                     onHomeClick = { viewModel.setFileExplorerOpen(true) },
                     onInfoClick = { viewModel.setInfoDialogOpen(true) },
                     onThemeToggleClick = { viewModel.toggleTheme() },
@@ -130,9 +151,9 @@ fun CPhoneApp(
                     onOpenFileClick = { openDocumentLauncher.launch(arrayOf("*/*")) },
                     onFileExplorerClick = { viewModel.setFileExplorerOpen(true) },
                     onSaveClick = { saveCurrentFile() },
-                    onSaveAsClick = { createDocumentLauncher.launch(activeTab.fileName) },
-                    onFindClick = { viewModel.openSearch(replaceMode = false) },
-                    onReplaceClick = { viewModel.openSearch(replaceMode = true) },
+                    onSaveAsClick = { saveAsLauncher.launch(activeTab.fileName) },
+                    onFindClick = { viewModel.openSearch(false) },
+                    onReplaceClick = { viewModel.openSearch(true) },
                     onSelectAllClick = { viewModel.selectAll() },
                     onUndoClick = { viewModel.undo() },
                     onRedoClick = { viewModel.redo() },
@@ -140,7 +161,7 @@ fun CPhoneApp(
                     onAboutClick = { viewModel.setAboutDialogOpen(true) }
                 )
 
-                // Multi-file tab bar (Acode style)
+                // Multi-file tab bar
                 if (settings.showTabBar && tabs.isNotEmpty()) {
                     EditorTabBar(
                         tabs = tabs,
@@ -148,25 +169,38 @@ fun CPhoneApp(
                         onTabSelected = { viewModel.selectTab(it) },
                         onTabClosed = { id ->
                             val tab = tabs.firstOrNull { it.id == id }
-                            if (tab?.isModified == true) {
-                                tabToCloseId = id
-                            } else {
-                                viewModel.closeTab(id)
-                            }
+                            if (tab?.isModified == true) tabToCloseId = id
+                            else viewModel.closeTab(id)
                         },
                         onNewTabClick = { viewModel.setNewFileDialogOpen(true) },
-                        isDarkMode = settings.isDarkMode
+                        isDarkMode = isDark
                     )
                 }
             }
+        },
+        bottomBar = {
+            // Bottom action bar clears the navigation bar / gesture bar
+            EditorBottomBar(
+                isDarkMode = isDark,
+                onUndo = { viewModel.undo() },
+                onRedo = { viewModel.redo() },
+                onTab = { insertTab() },
+                onFind = { viewModel.openSearch(false) },
+                onSave = { saveCurrentFile() },
+                onMoveCursorLeft = { moveCursorLeft() },
+                onMoveCursorRight = { moveCursorRight() },
+                modifier = Modifier.navigationBarsPadding() // ← clears nav bar / gesture area
+            )
         }
-    ) { paddingValues ->
+    ) { innerPadding ->
+        // innerPadding already accounts for topBar + bottomBar heights set by Scaffold
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
+                .padding(innerPadding)
+                .imePadding()  // ← pushes content up when keyboard opens
         ) {
-            // Search / Replace Bar if open
+            // Search / Replace Bar
             if (isSearchOpen) {
                 SearchReplaceBar(
                     searchQuery = searchQuery,
@@ -181,11 +215,11 @@ fun CPhoneApp(
                     onReplace = { viewModel.replaceCurrent() },
                     onReplaceAll = { viewModel.replaceAll() },
                     onClose = { viewModel.closeSearch() },
-                    isDarkMode = settings.isDarkMode
+                    isDarkMode = isDark
                 )
             }
 
-            // Main Code Editor Area with alternating background bands
+            // Code editor area — fills all remaining space
             CodeEditorArea(
                 textFieldValue = activeTab.state,
                 onValueChange = { viewModel.onTextChanged(it) },
@@ -195,7 +229,8 @@ fun CPhoneApp(
             )
         }
 
-        // Built-in File Explorer Sheet
+        // ── Overlays & Dialogs ───────────────────────────────────────────────
+
         if (isFileExplorerOpen) {
             val startDir = Environment.getExternalStorageDirectory() ?: File("/sdcard")
             FileExplorerSheet(
@@ -203,19 +238,17 @@ fun CPhoneApp(
                 onFileSelected = { file ->
                     try {
                         val content = file.readText(Charsets.UTF_8)
-                        val uri = Uri.fromFile(file)
-                        viewModel.openNewTab(file.name, content, uri)
+                        viewModel.openNewTab(file.name, content, android.net.Uri.fromFile(file))
                         Toast.makeText(context, "Opened: ${file.name}", Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         Toast.makeText(context, "Cannot open: ${e.message}", Toast.LENGTH_LONG).show()
                     }
                 },
                 onDismiss = { viewModel.setFileExplorerOpen(false) },
-                isDarkMode = settings.isDarkMode
+                isDarkMode = isDark
             )
         }
 
-        // AI Assistant Dialog
         if (isAiAssistantOpen) {
             val sel = activeTab.state.selection
             val selectedCode = if (sel.collapsed) "" else activeTab.state.text.substring(sel.min, sel.max)
@@ -230,25 +263,19 @@ fun CPhoneApp(
             )
         }
 
-        // File Information Dialog
         if (isInfoDialogOpen) {
-            val text = activeTab.state.text
-            val lineCount = if (text.isEmpty()) 1 else text.count { it == '\n' } + 1
-            val charCount = text.length
-            val byteSize = text.toByteArray(Charsets.UTF_8).size
-
+            val t = activeTab.state.text
             InfoDialog(
                 fileName = activeTab.fileName,
-                filePath = activeTab.uri?.path ?: "",
+                filePath = activeTab.uri?.path ?: "(unsaved)",
                 language = activeTab.language,
-                lineCount = lineCount,
-                charCount = charCount,
-                byteSize = byteSize,
+                lineCount = if (t.isEmpty()) 1 else t.count { it == '\n' } + 1,
+                charCount = t.length,
+                byteSize = t.toByteArray().size,
                 onDismiss = { viewModel.setInfoDialogOpen(false) }
             )
         }
 
-        // Settings Dialog
         if (isSettingsDialogOpen) {
             SettingsDialog(
                 settings = settings,
@@ -258,7 +285,6 @@ fun CPhoneApp(
             )
         }
 
-        // New File Dialog
         if (isNewFileDialogOpen) {
             NewFileDialog(
                 onConfirm = { name ->
@@ -269,30 +295,24 @@ fun CPhoneApp(
             )
         }
 
-        // About Dialog
         if (isAboutDialogOpen) {
             AboutDialog(onDismiss = { viewModel.setAboutDialogOpen(false) })
         }
 
-        // Confirm Close Unsaved Tab Dialog
-        tabToCloseId?.let { idToClose ->
-            val tab = tabs.firstOrNull { it.id == idToClose }
+        // Confirm close unsaved tab
+        tabToCloseId?.let { id ->
+            val tab = tabs.firstOrNull { it.id == id }
             AlertDialog(
                 onDismissRequest = { tabToCloseId = null },
                 title = { Text("Unsaved Changes") },
-                text = { Text("File '${tab?.fileName}' has unsaved changes. Close anyway?") },
+                text = { Text("'${tab?.fileName}' has unsaved changes. Close anyway?") },
                 confirmButton = {
-                    TextButton(onClick = {
-                        viewModel.closeTab(idToClose)
-                        tabToCloseId = null
-                    }) {
+                    TextButton(onClick = { viewModel.closeTab(id); tabToCloseId = null }) {
                         Text("Discard & Close", color = MaterialTheme.colorScheme.error)
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { tabToCloseId = null }) {
-                        Text("Cancel")
-                    }
+                    TextButton(onClick = { tabToCloseId = null }) { Text("Cancel") }
                 }
             )
         }

@@ -11,6 +11,18 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 
+/**
+ * AI assistant network service.
+ *
+ * Supported providers:
+ *   gemini      – Google Gemini via native API
+ *   claude      – Anthropic Claude (Messages API)
+ *   openai      – OpenAI Chat Completions
+ *   codex       – OpenAI (same API, alias for clarity)
+ *   kimi        – Moonshot AI (OpenAI-compatible, api.moonshot.cn)
+ *   antigravity – Antigravity / Google AI Studio OpenAI-compat endpoint
+ *   custom      – Any OpenAI-compatible endpoint (user provides URL)
+ */
 object AiAssistantService {
 
     suspend fun executeAiTask(
@@ -21,197 +33,218 @@ object AiAssistantService {
         try {
             val apiKey = settings.aiApiKey.trim()
             if (apiKey.isEmpty()) {
-                return@withContext Result.failure(Exception("AI API Key is empty. Please enter your API Key in AI Settings."))
+                return@withContext Result.failure(
+                    Exception("API Key is empty. Open AI Settings (⚙) and enter your key.")
+                )
             }
 
-            when (settings.aiProvider.lowercase()) {
-                "gemini" -> callGemini(apiKey, settings.aiModel, instruction, codeContext)
-                "claude" -> callClaude(apiKey, settings.aiModel, instruction, codeContext)
-                else -> callOpenAiCompatible(apiKey, settings.aiModel, settings.aiCustomEndpoint, instruction, codeContext)
+            when (settings.aiProvider.lowercase().trim()) {
+                "gemini"      -> callGemini(
+                    apiKey      = apiKey,
+                    model       = settings.aiModel.ifBlank { "gemini-2.0-flash" },
+                    instruction = instruction,
+                    codeContext = codeContext
+                )
+                "claude"      -> callClaude(
+                    apiKey      = apiKey,
+                    model       = settings.aiModel.ifBlank { "claude-3-5-sonnet-20241022" },
+                    instruction = instruction,
+                    codeContext = codeContext
+                )
+                "kimi"        -> callOpenAiCompat(
+                    apiKey      = apiKey,
+                    model       = settings.aiModel.ifBlank { "moonshot-v1-8k" },
+                    endpoint    = "https://api.moonshot.cn/v1/chat/completions",
+                    instruction = instruction,
+                    codeContext = codeContext
+                )
+                "antigravity" -> callOpenAiCompat(
+                    apiKey      = apiKey,
+                    model       = settings.aiModel.ifBlank { "gemini-2.0-flash" },
+                    endpoint    = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                    instruction = instruction,
+                    codeContext = codeContext
+                )
+                "openai",
+                "codex"       -> callOpenAiCompat(
+                    apiKey      = apiKey,
+                    model       = settings.aiModel.ifBlank { "gpt-4o" },
+                    endpoint    = "https://api.openai.com/v1/chat/completions",
+                    instruction = instruction,
+                    codeContext = codeContext
+                )
+                else          -> callOpenAiCompat(
+                    apiKey      = apiKey,
+                    model       = settings.aiModel,
+                    endpoint    = settings.aiCustomEndpoint.ifBlank { "https://api.openai.com/v1/chat/completions" },
+                    instruction = instruction,
+                    codeContext = codeContext
+                )
             }
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
+    // ── Gemini native API ─────────────────────────────────────────────────────
     private fun callGemini(
         apiKey: String,
         model: String,
         instruction: String,
         codeContext: String
     ): Result<String> {
-        val modelName = if (model.isBlank()) "gemini-1.5-flash" else model
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+        val prompt   = buildPrompt(instruction, codeContext)
 
-        val prompt = buildPrompt(instruction, codeContext)
-
-        val jsonBody = JSONObject().apply {
-            val contents = JSONArray().apply {
+        val body = JSONObject().apply {
+            put("contents", JSONArray().apply {
                 put(JSONObject().apply {
-                    val parts = JSONArray().apply {
+                    put("parts", JSONArray().apply {
                         put(JSONObject().put("text", prompt))
-                    }
-                    put("parts", parts)
+                    })
                 })
-            }
-            put("contents", contents)
+            })
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.2)
+                put("maxOutputTokens", 8192)
+            })
         }
 
-        val response = postJson(endpoint, jsonBody.toString(), mapOf("Content-Type" to "application/json"))
-        val jsonResp = JSONObject(response)
-        val candidates = jsonResp.optJSONArray("candidates")
+        val resp = postJson(endpoint, body.toString(), mapOf("Content-Type" to "application/json"))
+        val json = JSONObject(resp)
+        val candidates = json.optJSONArray("candidates")
         if (candidates != null && candidates.length() > 0) {
             val content = candidates.getJSONObject(0).optJSONObject("content")
-            val parts = content?.optJSONArray("parts")
+            val parts   = content?.optJSONArray("parts")
             if (parts != null && parts.length() > 0) {
-                val text = parts.getJSONObject(0).optString("text")
-                return Result.success(cleanCodeBlocks(text))
+                return Result.success(cleanCodeBlocks(parts.getJSONObject(0).optString("text")))
             }
         }
-
-        val error = jsonResp.optJSONObject("error")?.optString("message") ?: "Unknown Gemini API error"
-        return Result.failure(Exception(error))
+        val err = json.optJSONObject("error")?.optString("message") ?: "Unknown Gemini error"
+        return Result.failure(Exception(err))
     }
 
-    private fun callOpenAiCompatible(
-        apiKey: String,
-        model: String,
-        endpointUrl: String,
-        instruction: String,
-        codeContext: String
-    ): Result<String> {
-        val urlStr = if (endpointUrl.isBlank()) "https://api.openai.com/v1/chat/completions" else endpointUrl
-        val modelName = if (model.isBlank()) "gpt-4o-mini" else model
-
-        val jsonBody = JSONObject().apply {
-            put("model", modelName)
-            val messages = JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "system")
-                    put("content", "You are an expert AI programming assistant in a professional mobile code editor. Answer with clean, complete code and minimal conversational fluff.")
-                })
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", buildPrompt(instruction, codeContext))
-                })
-            }
-            put("messages", messages)
-        }
-
-        val headers = mapOf(
-            "Content-Type" to "application/json",
-            "Authorization" to "Bearer $apiKey"
-        )
-
-        val response = postJson(urlStr, jsonBody.toString(), headers)
-        val jsonResp = JSONObject(response)
-        val choices = jsonResp.optJSONArray("choices")
-        if (choices != null && choices.length() > 0) {
-            val msg = choices.getJSONObject(0).optJSONObject("message")
-            val text = msg?.optString("content") ?: ""
-            return Result.success(cleanCodeBlocks(text))
-        }
-
-        val error = jsonResp.optJSONObject("error")?.optString("message") ?: "Unknown OpenAI API error"
-        return Result.failure(Exception(error))
-    }
-
+    // ── Claude Messages API ───────────────────────────────────────────────────
     private fun callClaude(
         apiKey: String,
         model: String,
         instruction: String,
         codeContext: String
     ): Result<String> {
-        val endpoint = "https://api.anthropic.com/v1/messages"
-        val modelName = if (model.isBlank()) "claude-3-5-sonnet-20241022" else model
-
-        val jsonBody = JSONObject().apply {
-            put("model", modelName)
-            put("max_tokens", 4096)
-            val messages = JSONArray().apply {
+        val body = JSONObject().apply {
+            put("model", model)
+            put("max_tokens", 8192)
+            put("system", SYSTEM_PROMPT)
+            put("messages", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "user")
                     put("content", buildPrompt(instruction, codeContext))
                 })
-            }
-            put("messages", messages)
+            })
         }
-
         val headers = mapOf(
-            "Content-Type" to "application/json",
-            "x-api-key" to apiKey,
+            "Content-Type"      to "application/json",
+            "x-api-key"         to apiKey,
             "anthropic-version" to "2023-06-01"
         )
+        val resp = postJson("https://api.anthropic.com/v1/messages", body.toString(), headers)
+        val json = JSONObject(resp)
+        val content = json.optJSONArray("content")
+        if (content != null && content.length() > 0) {
+            return Result.success(cleanCodeBlocks(content.getJSONObject(0).optString("text")))
+        }
+        val err = json.optJSONObject("error")?.optString("message") ?: "Unknown Claude error"
+        return Result.failure(Exception(err))
+    }
 
-        val response = postJson(endpoint, jsonBody.toString(), headers)
-        val jsonResp = JSONObject(response)
-        val contentArray = jsonResp.optJSONArray("content")
-        if (contentArray != null && contentArray.length() > 0) {
-            val text = contentArray.getJSONObject(0).optString("text")
+    // ── OpenAI-compatible (OpenAI / Kimi / Antigravity / Custom) ─────────────
+    private fun callOpenAiCompat(
+        apiKey: String,
+        model: String,
+        endpoint: String,
+        instruction: String,
+        codeContext: String
+    ): Result<String> {
+        val body = JSONObject().apply {
+            put("model", model)
+            put("temperature", 0.2)
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", SYSTEM_PROMPT)
+                })
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", buildPrompt(instruction, codeContext))
+                })
+            })
+        }
+        val headers = mapOf(
+            "Content-Type"  to "application/json",
+            "Authorization" to "Bearer $apiKey"
+        )
+        val resp = postJson(endpoint, body.toString(), headers)
+        val json = JSONObject(resp)
+        val choices = json.optJSONArray("choices")
+        if (choices != null && choices.length() > 0) {
+            val text = choices.getJSONObject(0).optJSONObject("message")?.optString("content") ?: ""
             return Result.success(cleanCodeBlocks(text))
         }
-
-        val error = jsonResp.optJSONObject("error")?.optString("message") ?: "Unknown Claude API error"
-        return Result.failure(Exception(error))
+        val err = json.optJSONObject("error")?.optString("message") ?: "Unknown API error"
+        return Result.failure(Exception(err))
     }
+
+    // ── Prompt helpers ────────────────────────────────────────────────────────
+
+    private const val SYSTEM_PROMPT =
+        "You are an expert AI programming assistant embedded in CPhone, a professional mobile code editor. " +
+        "Always respond with clean, complete, working code. " +
+        "Do NOT wrap code in markdown fences unless the user explicitly asks for explanation. " +
+        "Be concise and production-ready."
 
     private fun buildPrompt(instruction: String, codeContext: String): String {
         return if (codeContext.isNotBlank()) {
-            """
-Task Instruction: $instruction
-
-Source Code:
-```
-$codeContext
-```
-""".trimIndent()
+            "Task: $instruction\n\nCode:\n```\n$codeContext\n```\n\nRespond with the complete updated code only."
         } else {
-            instruction
+            "Task: $instruction"
         }
     }
 
-    private fun cleanCodeBlocks(text: String): String {
-        val trimmed = text.trim()
-        if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
-            val firstNewline = trimmed.indexOf('\n')
-            if (firstNewline != -1) {
-                return trimmed.substring(firstNewline + 1, trimmed.length - 3).trim()
+    private fun cleanCodeBlocks(raw: String): String {
+        val t = raw.trim()
+        // Strip leading ```lang and trailing ```
+        if (t.startsWith("```")) {
+            val nl = t.indexOf('\n')
+            if (nl != -1 && t.endsWith("```")) {
+                return t.substring(nl + 1, t.length - 3).trim()
             }
         }
-        return trimmed
+        return t
     }
 
+    // ── HTTP POST ─────────────────────────────────────────────────────────────
     private fun postJson(urlString: String, jsonPayload: String, headers: Map<String, String>): String {
-        val url = URL(urlString)
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.doOutput = true
-        conn.connectTimeout = 30000
-        conn.readTimeout = 60000
+        val conn = URL(urlString).openConnection() as HttpURLConnection
+        conn.requestMethod  = "POST"
+        conn.doOutput       = true
+        conn.connectTimeout = 30_000
+        conn.readTimeout    = 90_000
 
         headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
 
-        OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
-            writer.write(jsonPayload)
-            writer.flush()
+        OutputStreamWriter(conn.outputStream, "UTF-8").use { it.write(jsonPayload); it.flush() }
+
+        val code   = conn.responseCode
+        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+        val body   = BufferedReader(InputStreamReader(stream, "UTF-8")).readText()
+
+        if (code !in 200..299) {
+            val msg = try {
+                JSONObject(body).optJSONObject("error")?.optString("message") ?: body
+            } catch (_: Exception) { body }
+            throw Exception("API Error $code: $msg")
         }
 
-        val responseCode = conn.responseCode
-        val stream = if (responseCode in 200..299) conn.inputStream else conn.errorStream
-        val reader = BufferedReader(InputStreamReader(stream, "UTF-8"))
-        val response = reader.readText()
-        reader.close()
-
-        if (responseCode !in 200..299) {
-            try {
-                val json = JSONObject(response)
-                val msg = json.optJSONObject("error")?.optString("message") ?: response
-                throw Exception("API Error ($responseCode): $msg")
-            } catch (_: Exception) {
-                throw Exception("API Error ($responseCode): $response")
-            }
-        }
-
-        return response
+        return body
     }
 }

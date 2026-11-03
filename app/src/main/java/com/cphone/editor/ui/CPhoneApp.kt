@@ -189,6 +189,7 @@ fun CPhoneApp(
                 onSave = { saveCurrentFile() },
                 onMoveCursorLeft = { moveCursorLeft() },
                 onMoveCursorRight = { moveCursorRight() },
+                onInsertText = { viewModel.insertTextAtCursor(it) },
                 modifier = Modifier.navigationBarsPadding() // ← clears nav bar / gesture area
             )
         }

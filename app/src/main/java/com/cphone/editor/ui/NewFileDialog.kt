@@ -11,7 +11,7 @@ fun NewFileDialog(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var fileName by remember { mutableStateOf("untitled.bat") }
+    var fileName by remember { mutableStateOf("untitled.txt") }
 
     AlertDialog(
         onDismissRequest = onDismiss,

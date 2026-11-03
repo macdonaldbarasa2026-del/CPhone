@@ -181,7 +181,7 @@ fun FileExplorerSheet(
 
     // New File Dialog
     if (showNewFileDialog) {
-        var newFileName by remember { mutableStateOf("script.bat") }
+        var newFileName by remember { mutableStateOf("new_file.txt") }
         AlertDialog(
             onDismissRequest = { showNewFileDialog = false },
             title = { Text("Create File") },

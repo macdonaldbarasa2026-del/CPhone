@@ -1,378 +1,353 @@
 package com.cphone.editor
 
+import android.app.Application
+import android.content.Context
 import android.net.Uri
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import com.cphone.editor.model.EditorSettings
 import com.cphone.editor.model.EditorTab
+import com.cphone.editor.model.RecentFile
 import com.cphone.editor.model.SupportedLanguage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.UUID
 
-class EditorViewModel : ViewModel() {
+class EditorViewModel(application: Application) : AndroidViewModel(application) {
 
-    companion object {
-        val DEFAULT_CODE = """
-@echo off
-title NetFetch High-Speed Broadband Connection Setup
-echo ========================================
-echo    NetFetch High-Speed Broadband Connection Setup
-echo ========================================
-echo.
-echo [1/4] Enabling Windows Network Services...
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\RasMan\Parameters" /v AllowL2TPWeakCrypto /t REG_DWORD /d 1 /f
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v AutoDetect /t REG_DWORD /d 0 /f
+    private val prefs = application.getSharedPreferences("cphone_prefs", Context.MODE_PRIVATE)
 
-echo [2/4] Setting NetFetch High-Speed Hotspot Profile...
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v MigrateProxy /t REG_DWORD /d 1 /f
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyHttp1.1 /t REG_DWORD /d 1 /f
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyOverride /t REG_SZ /d "<local>" /f
-
-echo [3/4] Registering Windows Broadband VPN/Tether Profile...
-set "PBK_DIR=%APPDATA%\Microsoft\Network\Connections\Pbk"
-if not exist "%PBK_DIR%" mkdir "%PBK_DIR%"
-set "PBK_FILE=%PBK_DIR%\rasphone.pbk"
-
-(
-echo [NetFetch Broadband Internet]
-echo MEDIA=rastapi
-echo Port=VPN2-0
-echo Device=WAN Miniport (IKEv2)
-echo DEVICE=vpn
-echo PhoneNumber=192.168.49.1
-echo Type=2
-echo AutoLogon=1
-echo UseRasCredentials=0
-) >> "%PBK_FILE%" 2>nul
-
-echo [4/4] Refreshing Windows Network Settings...
-""".trimIndent()
-    }
-
-    private val undoStacks = mutableMapOf<String, MutableList<TextFieldValue>>()
-    private val redoStacks = mutableMapOf<String, MutableList<TextFieldValue>>()
-
-    private val initialTab = EditorTab(
-        id = UUID.randomUUID().toString(),
-        fileName = "netfetch-broadband-setup.bat",
-        uri = null,
-        state = TextFieldValue(DEFAULT_CODE, TextRange(0)),
-        isModified = false,
-        language = SupportedLanguage.BATCH
-    )
-
-    private val _tabs = MutableStateFlow(listOf(initialTab))
-    val tabs: StateFlow<List<EditorTab>> = _tabs.asStateFlow()
-
-    private val _activeTabId = MutableStateFlow(initialTab.id)
-    val activeTabId: StateFlow<String> = _activeTabId.asStateFlow()
-
-    private val _settings = MutableStateFlow(EditorSettings())
+    // ── Settings (persisted) ─────────────────────────────────────────────────
+    private val _settings = MutableStateFlow(loadSettings())
     val settings: StateFlow<EditorSettings> = _settings.asStateFlow()
 
-    // Dialogs & Bars
-    private val _isSearchOpen = MutableStateFlow(false)
-    val isSearchOpen: StateFlow<Boolean> = _isSearchOpen.asStateFlow()
+    private fun loadSettings(): EditorSettings {
+        return EditorSettings(
+            isDarkMode        = prefs.getBoolean("dark_mode", true),
+            fontSizeSp        = prefs.getFloat("font_size", 14f),
+            tabSize           = prefs.getInt("tab_size", 4),
+            showLineNumbers   = prefs.getBoolean("show_line_numbers", true),
+            wordWrap          = prefs.getBoolean("word_wrap", false),
+            alternatingRowBands = prefs.getBoolean("row_bands", true),
+            showTabBar        = prefs.getBoolean("show_tab_bar", true),
+            bracketAutoClose  = prefs.getBoolean("bracket_auto_close", true),
+            aiProvider        = prefs.getString("ai_provider", "gemini") ?: "gemini",
+            aiApiKey          = prefs.getString("ai_api_key", "") ?: "",
+            aiModel           = prefs.getString("ai_model", "") ?: "",
+            aiCustomEndpoint  = prefs.getString("ai_endpoint", "") ?: ""
+        )
+    }
 
-    private val _isReplaceMode = MutableStateFlow(false)
-    val isReplaceMode: StateFlow<Boolean> = _isReplaceMode.asStateFlow()
+    private fun saveSettings(s: EditorSettings) {
+        prefs.edit()
+            .putBoolean("dark_mode", s.isDarkMode)
+            .putFloat("font_size", s.fontSizeSp)
+            .putInt("tab_size", s.tabSize)
+            .putBoolean("show_line_numbers", s.showLineNumbers)
+            .putBoolean("word_wrap", s.wordWrap)
+            .putBoolean("row_bands", s.alternatingRowBands)
+            .putBoolean("show_tab_bar", s.showTabBar)
+            .putBoolean("bracket_auto_close", s.bracketAutoClose)
+            .putString("ai_provider", s.aiProvider)
+            .putString("ai_api_key", s.aiApiKey)
+            .putString("ai_model", s.aiModel)
+            .putString("ai_endpoint", s.aiCustomEndpoint)
+            .apply()
+    }
 
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+    fun updateSettings(new: EditorSettings) {
+        _settings.value = new
+        saveSettings(new)
+    }
 
-    private val _replaceQuery = MutableStateFlow("")
-    val replaceQuery: StateFlow<String> = _replaceQuery.asStateFlow()
+    fun toggleTheme() {
+        updateSettings(_settings.value.copy(isDarkMode = !_settings.value.isDarkMode))
+    }
 
-    private val _searchMatches = MutableStateFlow<List<IntRange>>(emptyList())
-    val searchMatches: StateFlow<List<IntRange>> = _searchMatches.asStateFlow()
+    // ── Recent files (persisted) ─────────────────────────────────────────────
+    private val _recentFiles = MutableStateFlow(loadRecentFiles())
+    val recentFiles: StateFlow<List<RecentFile>> = _recentFiles.asStateFlow()
 
-    private val _currentMatchIndex = MutableStateFlow(0)
-    val currentMatchIndex: StateFlow<Int> = _currentMatchIndex.asStateFlow()
+    private fun loadRecentFiles(): List<RecentFile> {
+        val json = prefs.getString("recent_files", "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                RecentFile(
+                    name = obj.getString("name"),
+                    path = obj.getString("path"),
+                    uri  = Uri.parse(obj.getString("uri"))
+                )
+            }
+        } catch (_: Exception) { emptyList() }
+    }
 
-    private val _isInfoDialogOpen = MutableStateFlow(false)
-    val isInfoDialogOpen: StateFlow<Boolean> = _isInfoDialogOpen.asStateFlow()
+    private fun saveRecentFiles(list: List<RecentFile>) {
+        val arr = JSONArray()
+        list.take(20).forEach { f ->
+            arr.put(JSONObject().apply {
+                put("name", f.name)
+                put("path", f.path)
+                put("uri", f.uri.toString())
+            })
+        }
+        prefs.edit().putString("recent_files", arr.toString()).apply()
+    }
 
-    private val _isSettingsDialogOpen = MutableStateFlow(false)
-    val isSettingsDialogOpen: StateFlow<Boolean> = _isSettingsDialogOpen.asStateFlow()
+    private fun addToRecent(name: String, path: String, uri: Uri) {
+        val updated = (_recentFiles.value.filter { it.path != path } +
+                RecentFile(name, path, uri)).takeLast(20).reversed()
+        _recentFiles.value = updated
+        saveRecentFiles(updated)
+    }
 
-    private val _isNewFileDialogOpen = MutableStateFlow(false)
-    val isNewFileDialogOpen: StateFlow<Boolean> = _isNewFileDialogOpen.asStateFlow()
+    // ── Tabs ─────────────────────────────────────────────────────────────────
+    private val emptyTab = EditorTab(
+        id       = UUID.randomUUID().toString(),
+        fileName = "untitled.txt",
+        uri      = null,
+        state    = TextFieldValue("", TextRange(0)),
+        isModified = false,
+        language = SupportedLanguage.PLAINTEXT
+    )
 
-    private val _isFileExplorerOpen = MutableStateFlow(false)
-    val isFileExplorerOpen: StateFlow<Boolean> = _isFileExplorerOpen.asStateFlow()
+    private val _tabs = MutableStateFlow(listOf(emptyTab))
+    val tabs: StateFlow<List<EditorTab>> = _tabs.asStateFlow()
 
-    private val _isAiAssistantOpen = MutableStateFlow(false)
-    val isAiAssistantOpen: StateFlow<Boolean> = _isAiAssistantOpen.asStateFlow()
-
-    private val _isAboutDialogOpen = MutableStateFlow(false)
-    val isAboutDialogOpen: StateFlow<Boolean> = _isAboutDialogOpen.asStateFlow()
+    private val _activeTabId = MutableStateFlow(emptyTab.id)
+    val activeTabId: StateFlow<String> = _activeTabId.asStateFlow()
 
     val currentTab: EditorTab
         get() = _tabs.value.firstOrNull { it.id == _activeTabId.value } ?: _tabs.value.first()
 
-    val currentText: String
-        get() = currentTab.state.text
+    // ── Undo / Redo ──────────────────────────────────────────────────────────
+    private val undoStacks = mutableMapOf<String, ArrayDeque<TextFieldValue>>()
+    private val redoStacks = mutableMapOf<String, ArrayDeque<TextFieldValue>>()
 
-    init {
-        getUndoStack(initialTab.id).add(initialTab.state)
-    }
+    private fun undoStack(id: String) = undoStacks.getOrPut(id) { ArrayDeque() }
+    private fun redoStack(id: String) = redoStacks.getOrPut(id) { ArrayDeque() }
 
-    private fun getUndoStack(id: String): MutableList<TextFieldValue> {
-        return undoStacks.getOrPut(id) { mutableListOf() }
-    }
-
-    private fun getRedoStack(id: String): MutableList<TextFieldValue> {
-        return redoStacks.getOrPut(id) { mutableListOf() }
-    }
-
-    fun onTextChanged(newValue: TextFieldValue) {
+    fun onTextChanged(new: TextFieldValue) {
         val tab = currentTab
         val old = tab.state
-        if (old.text != newValue.text) {
-            val uStack = getUndoStack(tab.id)
-            if (uStack.size > 200) uStack.removeAt(0)
-            uStack.add(old)
-            getRedoStack(tab.id).clear()
-
-            updateCurrentTab { it.copy(state = newValue, isModified = true) }
-
+        if (old.text != new.text) {
+            val u = undoStack(tab.id)
+            if (u.size > 300) u.removeFirst()
+            u.addLast(old)
+            redoStack(tab.id).clear()
+            updateCurrentTab { it.copy(state = new, isModified = true) }
             if (_isSearchOpen.value && _searchQuery.value.isNotEmpty()) {
-                updateSearchMatches(_searchQuery.value, newValue.text)
+                updateSearchMatches(_searchQuery.value, new.text)
             }
         } else {
-            updateCurrentTab { it.copy(state = newValue) }
-        }
-    }
-
-    private fun updateCurrentTab(transform: (EditorTab) -> EditorTab) {
-        val activeId = _activeTabId.value
-        _tabs.update { list ->
-            list.map { if (it.id == activeId) transform(it) else it }
+            updateCurrentTab { it.copy(state = new) }
         }
     }
 
     fun undo() {
         val tab = currentTab
-        val uStack = getUndoStack(tab.id)
-        if (uStack.isNotEmpty()) {
-            val current = tab.state
-            getRedoStack(tab.id).add(current)
-            val previous = uStack.removeAt(uStack.lastIndex)
-            updateCurrentTab { it.copy(state = previous, isModified = true) }
+        val u = undoStack(tab.id)
+        if (u.isNotEmpty()) {
+            redoStack(tab.id).addLast(tab.state)
+            updateCurrentTab { it.copy(state = u.removeLast(), isModified = true) }
         }
     }
 
     fun redo() {
         val tab = currentTab
-        val rStack = getRedoStack(tab.id)
-        if (rStack.isNotEmpty()) {
-            val current = tab.state
-            getUndoStack(tab.id).add(current)
-            val next = rStack.removeAt(rStack.lastIndex)
-            updateCurrentTab { it.copy(state = next, isModified = true) }
+        val r = redoStack(tab.id)
+        if (r.isNotEmpty()) {
+            undoStack(tab.id).addLast(tab.state)
+            updateCurrentTab { it.copy(state = r.removeLast(), isModified = true) }
         }
     }
 
     fun selectAll() {
         val tab = currentTab
-        val len = tab.state.text.length
-        updateCurrentTab { it.copy(state = it.state.copy(selection = TextRange(0, len))) }
+        updateCurrentTab { it.copy(state = it.state.copy(selection = TextRange(0, it.state.text.length))) }
     }
 
-    fun toggleTheme() {
-        _settings.update { it.copy(isDarkMode = !it.isDarkMode) }
-    }
-
-    fun updateSettings(newSettings: EditorSettings) {
-        _settings.value = newSettings
-    }
-
-    // Tabs Management
-    fun selectTab(id: String) {
-        _activeTabId.value = id
-    }
-
-    fun closeTab(id: String) {
-        val currentList = _tabs.value
-        if (currentList.size <= 1) return
-
-        val closeIndex = currentList.indexOfFirst { it.id == id }
-        val newList = currentList.filterNot { it.id == id }
-        _tabs.value = newList
-
-        if (_activeTabId.value == id) {
-            val newActiveIndex = if (closeIndex >= newList.size) newList.size - 1 else closeIndex
-            _activeTabId.value = newList[newActiveIndex].id
-        }
-
-        undoStacks.remove(id)
-        redoStacks.remove(id)
-    }
-
-    fun openFile(name: String, content: String, uri: Uri? = null) = openNewTab(name, content, uri)
-
-    fun openNewTab(name: String, content: String = "", uri: Uri? = null) {
-        // If file is already open, switch to that tab
-        if (uri != null) {
-            val existing = _tabs.value.firstOrNull { it.uri == uri }
+    // ── Tab management ───────────────────────────────────────────────────────
+    fun openNewTab(name: String, content: String, uri: Uri? = null) {
+        // If the only tab is the blank untitled, replace it
+        val current = _tabs.value
+        if (current.size == 1 && current[0].fileName == "untitled.txt" &&
+            current[0].state.text.isEmpty() && !current[0].isModified) {
+            val tab = EditorTab(
+                id       = current[0].id,
+                fileName = name,
+                uri      = uri,
+                state    = TextFieldValue(content, TextRange(0)),
+                isModified = false,
+                language = SupportedLanguage.detect(name)
+            )
+            _tabs.value = listOf(tab)
+            _activeTabId.value = tab.id
+        } else {
+            // Check if already open
+            val existing = current.firstOrNull { it.uri != null && it.uri == uri }
             if (existing != null) {
                 _activeTabId.value = existing.id
                 return
             }
+            val tab = EditorTab(
+                id       = UUID.randomUUID().toString(),
+                fileName = name,
+                uri      = uri,
+                state    = TextFieldValue(content, TextRange(0)),
+                isModified = false,
+                language = SupportedLanguage.detect(name)
+            )
+            _tabs.update { it + tab }
+            _activeTabId.value = tab.id
         }
+        if (uri != null) addToRecent(name, uri.path ?: name, uri)
+    }
 
-        val newTab = EditorTab(
-            id = UUID.randomUUID().toString(),
-            fileName = name,
-            uri = uri,
-            state = TextFieldValue(content, TextRange(0)),
-            isModified = false,
-            language = SupportedLanguage.detect(name)
-        )
-        getUndoStack(newTab.id).add(newTab.state)
+    fun openFile(name: String, content: String, uri: Uri? = null) = openNewTab(name, content, uri)
 
-        _tabs.update { it + newTab }
-        _activeTabId.value = newTab.id
+    fun selectTab(id: String) { _activeTabId.value = id }
+
+    fun closeTab(id: String) {
+        val list = _tabs.value
+        if (list.size == 1) {
+            // Reset to blank instead of closing last tab
+            _tabs.value = listOf(emptyTab.copy(id = UUID.randomUUID().toString()))
+            _activeTabId.value = _tabs.value[0].id
+            return
+        }
+        val idx = list.indexOfFirst { it.id == id }
+        val newList = list.filter { it.id != id }
+        _tabs.value = newList
+        if (_activeTabId.value == id) {
+            _activeTabId.value = newList.getOrElse(idx.coerceAtMost(newList.lastIndex)) { newList.last() }.id
+        }
+        undoStacks.remove(id)
+        redoStacks.remove(id)
     }
 
     fun markSaved(uri: Uri? = null, name: String? = null) {
         updateCurrentTab { tab ->
-            tab.copy(
-                isModified = false,
-                uri = uri ?: tab.uri,
-                fileName = name ?: tab.fileName,
-                language = if (name != null) SupportedLanguage.detect(name) else tab.language
-            )
+            val newUri = uri ?: tab.uri
+            val newName = name ?: tab.fileName
+            if (newUri != null) addToRecent(newName, newUri.path ?: newName, newUri)
+            tab.copy(isModified = false, uri = newUri, fileName = newName,
+                language = if (name != null) SupportedLanguage.detect(name) else tab.language)
         }
     }
 
-    fun resetToDefault() {
-        openNewTab("netfetch-broadband-setup.bat", DEFAULT_CODE, null)
-    }
-
-    fun insertTextAtCursor(textToInsert: String) {
+    fun insertTextAtCursor(text: String) {
         val tab = currentTab
-        val currentText = tab.state.text
-        val selection = tab.state.selection
-        val newText = if (selection.collapsed) {
-            currentText.substring(0, selection.start) + textToInsert + currentText.substring(selection.start)
-        } else {
-            currentText.replaceRange(selection.min, selection.max, textToInsert)
-        }
-        val newCursor = selection.min + textToInsert.length
+        val sel = tab.state.selection
+        val cur = tab.state.text
+        val newText = if (sel.collapsed)
+            cur.substring(0, sel.start) + text + cur.substring(sel.start)
+        else
+            cur.replaceRange(sel.min, sel.max, text)
+        val newCursor = sel.min + text.length
         onTextChanged(TextFieldValue(newText, TextRange(newCursor)))
     }
 
-    fun replaceEntireFile(newContent: String) {
-        onTextChanged(TextFieldValue(newContent, TextRange(0)))
+    fun replaceEntireFile(content: String) {
+        onTextChanged(TextFieldValue(content, TextRange(0)))
     }
 
-    // Search & Replace
-    fun openSearch(replaceMode: Boolean = false) {
-        _isReplaceMode.value = replaceMode
-        _isSearchOpen.value = true
+    private fun updateCurrentTab(transform: (EditorTab) -> EditorTab) {
+        val id = _activeTabId.value
+        _tabs.update { list -> list.map { if (it.id == id) transform(it) else it } }
     }
 
-    fun closeSearch() {
-        _isSearchOpen.value = false
-        _searchMatches.value = emptyList()
-        _currentMatchIndex.value = 0
-    }
+    // ── Search & Replace ─────────────────────────────────────────────────────
+    private val _isSearchOpen    = MutableStateFlow(false)
+    private val _isReplaceMode   = MutableStateFlow(false)
+    private val _searchQuery     = MutableStateFlow("")
+    private val _replaceQuery    = MutableStateFlow("")
+    private val _searchMatches   = MutableStateFlow<List<IntRange>>(emptyList())
+    private val _currentMatchIdx = MutableStateFlow(0)
 
-    fun onSearchQueryChanged(query: String) {
-        _searchQuery.value = query
-        updateSearchMatches(query, currentTab.state.text)
-    }
+    val isSearchOpen:    StateFlow<Boolean>       = _isSearchOpen.asStateFlow()
+    val isReplaceMode:   StateFlow<Boolean>       = _isReplaceMode.asStateFlow()
+    val searchQuery:     StateFlow<String>        = _searchQuery.asStateFlow()
+    val replaceQuery:    StateFlow<String>        = _replaceQuery.asStateFlow()
+    val searchMatches:   StateFlow<List<IntRange>>= _searchMatches.asStateFlow()
+    val currentMatchIndex: StateFlow<Int>         = _currentMatchIdx.asStateFlow()
 
-    fun onReplaceQueryChanged(query: String) {
-        _replaceQuery.value = query
-    }
+    fun openSearch(replaceMode: Boolean = false) { _isReplaceMode.value = replaceMode; _isSearchOpen.value = true }
+    fun closeSearch() { _isSearchOpen.value = false; _searchMatches.value = emptyList(); _currentMatchIdx.value = 0 }
 
-    private fun updateSearchMatches(query: String, text: String) {
-        if (query.isEmpty()) {
-            _searchMatches.value = emptyList()
-            _currentMatchIndex.value = 0
-            return
-        }
+    fun onSearchQueryChanged(q: String) { _searchQuery.value = q; updateSearchMatches(q, currentTab.state.text) }
+    fun onReplaceQueryChanged(q: String) { _replaceQuery.value = q }
 
+    private fun updateSearchMatches(q: String, text: String) {
+        if (q.isEmpty()) { _searchMatches.value = emptyList(); _currentMatchIdx.value = 0; return }
         val matches = mutableListOf<IntRange>()
-        var index = 0
-        while (index < text.length) {
-            val found = text.indexOf(query, index, ignoreCase = true)
-            if (found == -1) break
-            matches.add(found until (found + query.length))
-            index = found + query.length
+        var i = 0
+        while (i < text.length) {
+            val f = text.indexOf(q, i, ignoreCase = true)
+            if (f == -1) break
+            matches.add(f until f + q.length)
+            i = f + q.length
         }
         _searchMatches.value = matches
-        if (matches.isNotEmpty()) {
-            _currentMatchIndex.value = 0
-            highlightCurrentMatch()
-        }
+        if (matches.isNotEmpty()) { _currentMatchIdx.value = 0; highlightMatch() }
     }
 
     fun findNext() {
-        val matches = _searchMatches.value
-        if (matches.isEmpty()) return
-        val next = (_currentMatchIndex.value + 1) % matches.size
-        _currentMatchIndex.value = next
-        highlightCurrentMatch()
+        val m = _searchMatches.value; if (m.isEmpty()) return
+        _currentMatchIdx.value = (_currentMatchIdx.value + 1) % m.size; highlightMatch()
     }
-
     fun findPrevious() {
-        val matches = _searchMatches.value
-        if (matches.isEmpty()) return
-        val prev = if (_currentMatchIndex.value - 1 < 0) matches.size - 1 else _currentMatchIndex.value - 1
-        _currentMatchIndex.value = prev
-        highlightCurrentMatch()
+        val m = _searchMatches.value; if (m.isEmpty()) return
+        _currentMatchIdx.value = if (_currentMatchIdx.value - 1 < 0) m.lastIndex else _currentMatchIdx.value - 1
+        highlightMatch()
     }
-
-    private fun highlightCurrentMatch() {
-        val matches = _searchMatches.value
-        val idx = _currentMatchIndex.value
-        if (idx in matches.indices) {
-            val range = matches[idx]
-            updateCurrentTab { tab ->
-                tab.copy(state = tab.state.copy(selection = TextRange(range.first, range.last + 1)))
-            }
-        }
+    private fun highlightMatch() {
+        val r = _searchMatches.value.getOrNull(_currentMatchIdx.value) ?: return
+        updateCurrentTab { it.copy(state = it.state.copy(selection = TextRange(r.first, r.last + 1))) }
     }
-
     fun replaceCurrent() {
-        val matches = _searchMatches.value
-        val idx = _currentMatchIndex.value
-        if (matches.isNotEmpty() && idx in matches.indices) {
-            val range = matches[idx]
-            val text = currentTab.state.text
-            val newText = text.replaceRange(range.first, range.last + 1, _replaceQuery.value)
-            onTextChanged(
-                TextFieldValue(
-                    text = newText,
-                    selection = TextRange(range.first + _replaceQuery.value.length)
-                )
-            )
-            updateSearchMatches(_searchQuery.value, newText)
-        }
+        val matches = _searchMatches.value; val idx = _currentMatchIdx.value
+        if (matches.isEmpty() || idx !in matches.indices) return
+        val r = matches[idx]; val text = currentTab.state.text
+        val newText = text.replaceRange(r.first, r.last + 1, _replaceQuery.value)
+        onTextChanged(TextFieldValue(newText, TextRange(r.first + _replaceQuery.value.length)))
+        updateSearchMatches(_searchQuery.value, newText)
     }
-
     fun replaceAll() {
-        val query = _searchQuery.value
-        if (query.isEmpty()) return
-        val text = currentTab.state.text
-        val newText = text.replace(query, _replaceQuery.value, ignoreCase = true)
+        val q = _searchQuery.value; if (q.isEmpty()) return
+        val newText = currentTab.state.text.replace(q, _replaceQuery.value, ignoreCase = true)
         onTextChanged(TextFieldValue(newText, TextRange(0)))
-        updateSearchMatches(query, newText)
+        updateSearchMatches(q, newText)
     }
 
-    // Dialog toggles
-    fun setInfoDialogOpen(open: Boolean) { _isInfoDialogOpen.value = open }
-    fun setSettingsDialogOpen(open: Boolean) { _isSettingsDialogOpen.value = open }
-    fun setNewFileDialogOpen(open: Boolean) { _isNewFileDialogOpen.value = open }
-    fun setFileExplorerOpen(open: Boolean) { _isFileExplorerOpen.value = open }
-    fun setAiAssistantOpen(open: Boolean) { _isAiAssistantOpen.value = open }
-    fun setAboutDialogOpen(open: Boolean) { _isAboutDialogOpen.value = open }
+    // ── Dialog toggles ───────────────────────────────────────────────────────
+    private val _isInfoOpen     = MutableStateFlow(false)
+    private val _isSettingsOpen = MutableStateFlow(false)
+    private val _isNewFileOpen  = MutableStateFlow(false)
+    private val _isExplorerOpen = MutableStateFlow(false)
+    private val _isAiOpen       = MutableStateFlow(false)
+    private val _isAboutOpen    = MutableStateFlow(false)
+    private val _isRecentOpen   = MutableStateFlow(false)
+
+    val isInfoDialogOpen:     StateFlow<Boolean> = _isInfoOpen.asStateFlow()
+    val isSettingsDialogOpen: StateFlow<Boolean> = _isSettingsOpen.asStateFlow()
+    val isNewFileDialogOpen:  StateFlow<Boolean> = _isNewFileOpen.asStateFlow()
+    val isFileExplorerOpen:   StateFlow<Boolean> = _isExplorerOpen.asStateFlow()
+    val isAiAssistantOpen:    StateFlow<Boolean> = _isAiOpen.asStateFlow()
+    val isAboutDialogOpen:    StateFlow<Boolean> = _isAboutOpen.asStateFlow()
+    val isRecentFilesOpen:    StateFlow<Boolean> = _isRecentOpen.asStateFlow()
+
+    fun setInfoDialogOpen(v: Boolean)     { _isInfoOpen.value = v }
+    fun setSettingsDialogOpen(v: Boolean) { _isSettingsOpen.value = v }
+    fun setNewFileDialogOpen(v: Boolean)  { _isNewFileOpen.value = v }
+    fun setFileExplorerOpen(v: Boolean)   { _isExplorerOpen.value = v }
+    fun setAiAssistantOpen(v: Boolean)    { _isAiOpen.value = v }
+    fun setAboutDialogOpen(v: Boolean)    { _isAboutOpen.value = v }
+    fun setRecentFilesOpen(v: Boolean)    { _isRecentOpen.value = v }
 }

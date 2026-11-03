@@ -53,7 +53,11 @@ fun AiAssistantDialog(
         "Fix Bugs",
         "Explain Code",
         "Refactor",
-        "Add Comments"
+        "Add Comments",
+        "Optimize",
+        "Write Tests",
+        "Convert Language",
+        "Add Types"
     )
 
     fun runTask(action: String) {
@@ -140,16 +144,35 @@ fun AiAssistantDialog(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf("gemini", "openai", "claude", "custom").forEach { prov ->
+                        listOf("gemini", "claude", "openai", "codex", "kimi", "antigravity", "custom").forEach { prov ->
                             FilterChip(
                                 selected = provider.equals(prov, ignoreCase = true),
                                 onClick = {
                                     provider = prov
-                                    if (prov == "gemini") model = "gemini-1.5-flash"
-                                    if (prov == "openai") model = "gpt-4o-mini"
-                                    if (prov == "claude") model = "claude-3-5-sonnet-20241022"
+                                    // Pre-fill sensible default models
+                                    when (prov) {
+                                        "gemini"      -> if (model.isBlank()) model = "gemini-2.0-flash"
+                                        "openai",
+                                        "codex"       -> if (model.isBlank()) model = "gpt-4o"
+                                        "claude"      -> if (model.isBlank()) model = "claude-3-5-sonnet-20241022"
+                                        "kimi"        -> if (model.isBlank()) model = "moonshot-v1-8k"
+                                        "antigravity" -> if (model.isBlank()) model = "gemini-2.0-flash"
+                                    }
                                 },
-                                label = { Text(prov.replaceFirstChar { it.uppercase() }) }
+                                label = {
+                                    Text(
+                                        when (prov) {
+                                            "gemini"      -> "Gemini"
+                                            "claude"      -> "Claude"
+                                            "openai"      -> "OpenAI"
+                                            "codex"       -> "Codex"
+                                            "kimi"        -> "Kimi"
+                                            "antigravity" -> "Antigravity"
+                                            else          -> "Custom"
+                                        },
+                                        fontSize = 12.sp
+                                    )
+                                }
                             )
                         }
                     }
@@ -227,7 +250,7 @@ fun AiAssistantDialog(
                     OutlinedTextField(
                         value = promptInput,
                         onValueChange = { promptInput = it },
-                        placeholder = { Text("E.g., Write a batch script to ping gateway...") },
+                        placeholder = { Text("Describe what you want to build or fix...") },
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 72.dp, max = 120.dp)

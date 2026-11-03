@@ -5,12 +5,13 @@ data class EditorSettings(
     val tabSize: Int = 4,
     val showLineNumbers: Boolean = true,
     val wordWrap: Boolean = false,
-    val isDarkMode: Boolean = false,
+    val isDarkMode: Boolean = true,          // default dark like VS Code
     val alternatingRowBands: Boolean = true,
     val showTabBar: Boolean = true,
+    val bracketAutoClose: Boolean = true,
     // AI Settings
-    val aiProvider: String = "gemini", // "gemini", "openai", "claude", "custom"
+    val aiProvider: String = "gemini",       // "gemini","claude","openai","codex","kimi","antigravity","custom"
     val aiApiKey: String = "",
-    val aiModel: String = "gemini-1.5-flash",
-    val aiCustomEndpoint: String = "https://api.openai.com/v1/chat/completions"
+    val aiModel: String = "",
+    val aiCustomEndpoint: String = ""
 )

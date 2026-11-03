@@ -24,7 +24,7 @@ enum class SupportedLanguage(
     companion object {
         fun detect(fileName: String): SupportedLanguage {
             val ext = fileName.substringAfterLast('.', "").lowercase()
-            return entries.firstOrNull { it.extensions.contains(ext) } ?: BATCH
+            return entries.firstOrNull { it.extensions.contains(ext) } ?: PLAINTEXT
         }
     }
 }

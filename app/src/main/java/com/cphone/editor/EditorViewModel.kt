@@ -275,7 +275,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     val isReplaceMode:   StateFlow<Boolean>       = _isReplaceMode.asStateFlow()
     val searchQuery:     StateFlow<String>        = _searchQuery.asStateFlow()
     val replaceQuery:    StateFlow<String>        = _replaceQuery.asStateFlow()
-    val searchMatches:   StateFlow<List<IntRange>>= _searchMatches.asStateFlow()
+    val searchMatches:     StateFlow<List<IntRange>> = _searchMatches.asStateFlow()
     val currentMatchIndex: StateFlow<Int>         = _currentMatchIdx.asStateFlow()
 
     fun openSearch(replaceMode: Boolean = false) { _isReplaceMode.value = replaceMode; _isSearchOpen.value = true }

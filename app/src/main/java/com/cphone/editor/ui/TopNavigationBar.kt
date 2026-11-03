@@ -3,6 +3,7 @@ package com.cphone.editor.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
@@ -24,8 +25,10 @@ fun TopNavigationBar(
     onHomeClick: () -> Unit,
     onInfoClick: () -> Unit,
     onThemeToggleClick: () -> Unit,
+    onAiAssistantClick: () -> Unit,
     onNewFileClick: () -> Unit,
     onOpenFileClick: () -> Unit,
+    onFileExplorerClick: () -> Unit,
     onSaveClick: () -> Unit,
     onSaveAsClick: () -> Unit,
     onFindClick: () -> Unit,
@@ -34,6 +37,7 @@ fun TopNavigationBar(
     onUndoClick: () -> Unit,
     onRedoClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onAboutClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -61,7 +65,7 @@ fun TopNavigationBar(
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.ic_home_outline),
-                    contentDescription = "Home",
+                    contentDescription = "Home / File Explorer",
                     tint = contentColor,
                     modifier = Modifier.size(22.dp)
                 )
@@ -79,6 +83,19 @@ fun TopNavigationBar(
                     .weight(1f)
                     .padding(horizontal = 6.dp)
             )
+
+            // AI Assistant action icon
+            IconButton(
+                onClick = onAiAssistantClick,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = "AI Coding Assistant",
+                    tint = Color(0xFF007AFF),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
 
             // Info (ⓘ) icon
             IconButton(
@@ -126,19 +143,23 @@ fun TopNavigationBar(
                     modifier = Modifier.background(if (isDarkMode) Color(0xFF2A2A2A) else Color(0xFFFFFFFF))
                 ) {
                     DropdownMenuItem(
-                        text = { Text("New file") },
+                        text = { Text("New File") },
                         onClick = { menuExpanded = false; onNewFileClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Open file") },
+                        text = { Text("Open File") },
                         onClick = { menuExpanded = false; onOpenFileClick() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("File Explorer") },
+                        onClick = { menuExpanded = false; onFileExplorerClick() }
                     )
                     DropdownMenuItem(
                         text = { Text("Save") },
                         onClick = { menuExpanded = false; onSaveClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Save as") },
+                        text = { Text("Save As") },
                         onClick = { menuExpanded = false; onSaveAsClick() }
                     )
                     HorizontalDivider(color = dividerColor)
@@ -151,7 +172,7 @@ fun TopNavigationBar(
                         onClick = { menuExpanded = false; onReplaceClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Select all") },
+                        text = { Text("Select All") },
                         onClick = { menuExpanded = false; onSelectAllClick() }
                     )
                     HorizontalDivider(color = dividerColor)
@@ -165,8 +186,16 @@ fun TopNavigationBar(
                     )
                     HorizontalDivider(color = dividerColor)
                     DropdownMenuItem(
+                        text = { Text("AI Assistant") },
+                        onClick = { menuExpanded = false; onAiAssistantClick() }
+                    )
+                    DropdownMenuItem(
                         text = { Text("Settings") },
                         onClick = { menuExpanded = false; onSettingsClick() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("About") },
+                        onClick = { menuExpanded = false; onAboutClick() }
                     )
                 }
             }

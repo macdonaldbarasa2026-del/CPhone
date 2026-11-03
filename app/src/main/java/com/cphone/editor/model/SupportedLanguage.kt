@@ -11,11 +11,15 @@ enum class SupportedLanguage(
     JAVASCRIPT("JavaScript", listOf("js", "jsx", "mjs")),
     TYPESCRIPT("TypeScript", listOf("ts", "tsx")),
     HTML("HTML", listOf("html", "htm")),
-    CSS("CSS", listOf("css", "scss")),
+    CSS("CSS", listOf("css", "scss", "sass")),
     JSON("JSON", listOf("json")),
     XML("XML", listOf("xml", "svg", "xaml")),
     SHELL("Shell Script", listOf("sh", "bash", "zsh")),
-    CPP("C / C++", listOf("c", "cpp", "h", "hpp", "cc", "cxx"));
+    CPP("C / C++", listOf("c", "cpp", "h", "hpp", "cc", "cxx")),
+    PHP("PHP", listOf("php", "phtml")),
+    MARKDOWN("Markdown", listOf("md", "markdown")),
+    YAML("YAML", listOf("yaml", "yml")),
+    PLAINTEXT("Plain Text", listOf("txt", "log", "conf", "ini"));
 
     companion object {
         fun detect(fileName: String): SupportedLanguage {

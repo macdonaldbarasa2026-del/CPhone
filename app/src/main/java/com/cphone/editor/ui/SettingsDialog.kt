@@ -1,6 +1,8 @@
 package com.cphone.editor.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,12 +16,15 @@ import com.cphone.editor.model.EditorSettings
 fun SettingsDialog(
     settings: EditorSettings,
     onSettingsChanged: (EditorSettings) -> Unit,
+    onOpenAiSettings: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var fontSize by remember { mutableFloatStateOf(settings.fontSizeSp) }
     var tabSize by remember { mutableIntStateOf(settings.tabSize) }
     var showLineNumbers by remember { mutableStateOf(settings.showLineNumbers) }
     var wordWrap by remember { mutableStateOf(settings.wordWrap) }
+    var alternatingBands by remember { mutableStateOf(settings.alternatingRowBands) }
+    var showTabBar by remember { mutableStateOf(settings.showTabBar) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -28,8 +33,10 @@ fun SettingsDialog(
         },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // Font Size
                 Column {
@@ -69,6 +76,22 @@ fun SettingsDialog(
                     }
                 }
 
+                // Alternating Background Bands (Ruled Paper lines)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Alternating Row Bands", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text("Subtle pale-blue ruled paper stripes", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                    }
+                    Switch(
+                        checked = alternatingBands,
+                        onCheckedChange = { alternatingBands = it }
+                    )
+                }
+
                 // Show Line Numbers
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -79,6 +102,19 @@ fun SettingsDialog(
                     Switch(
                         checked = showLineNumbers,
                         onCheckedChange = { showLineNumbers = it }
+                    )
+                }
+
+                // Show Multi-file Tab Bar
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Multi-file Tab Bar", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Switch(
+                        checked = showTabBar,
+                        onCheckedChange = { showTabBar = it }
                     )
                 }
 
@@ -94,6 +130,19 @@ fun SettingsDialog(
                         onCheckedChange = { wordWrap = it }
                     )
                 }
+
+                HorizontalDivider()
+
+                // AI Assistant Setup shortcut
+                OutlinedButton(
+                    onClick = {
+                        onDismiss()
+                        onOpenAiSettings()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Configure AI Assistant API")
+                }
             }
         },
         confirmButton = {
@@ -104,7 +153,9 @@ fun SettingsDialog(
                             fontSizeSp = fontSize,
                             tabSize = tabSize,
                             showLineNumbers = showLineNumbers,
-                            wordWrap = wordWrap
+                            wordWrap = wordWrap,
+                            alternatingRowBands = alternatingBands,
+                            showTabBar = showTabBar
                         )
                     )
                     onDismiss()

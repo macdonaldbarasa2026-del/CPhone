@@ -73,6 +73,10 @@ object SyntaxHighlighter {
                     SupportedLanguage.CSS -> highlightCSS(text, colors)
                     SupportedLanguage.JSON -> highlightJSON(text, colors)
                     SupportedLanguage.SHELL -> highlightShell(text, colors)
+                    SupportedLanguage.PHP -> highlightPHP(text, colors)
+                    SupportedLanguage.MARKDOWN -> highlightMarkdown(text, colors)
+                    SupportedLanguage.YAML -> highlightYAML(text, colors)
+                    SupportedLanguage.PLAINTEXT -> { /* keep default */ }
                 }
             } catch (_: Exception) {
                 // Keep default style on any regex parsing edge cases
@@ -99,106 +103,88 @@ object SyntaxHighlighter {
     }
 
     private fun AnnotatedString.Builder.highlightPython(text: String, colors: SyntaxColors) {
-        // Strings
         highlightRegex(text, "\"\"\"[\\s\\S]*?\"\"\"|'''[\\s\\S]*?'''|\"[^\"]*\"|'[^']*'", SpanStyle(color = colors.string))
-
-        // Numbers
         highlightRegex(text, "\\b\\d+(\\.\\d+)?\\b", SpanStyle(color = colors.number))
-
-        // Keywords
         val pyKeywords = "\\b(def|class|import|from|as|return|if|elif|else|while|for|in|try|except|finally|with|raise|assert|yield|lambda|pass|break|continue|None|True|False|async|await|and|or|not|is|self)\\b"
         highlightRegex(text, pyKeywords, SpanStyle(color = colors.keyword, fontWeight = FontWeight.SemiBold))
-
-        // Comments
         highlightRegex(text, "#.*$", SpanStyle(color = colors.comment))
     }
 
     private fun AnnotatedString.Builder.highlightCStyle(text: String, colors: SyntaxColors) {
-        // Strings
         highlightRegex(text, "\"[^\"]*\"|'[^']*'", SpanStyle(color = colors.string))
-
-        // Numbers
         highlightRegex(text, "\\b\\d+(\\.\\d+)?([fFlLuU])?\\b", SpanStyle(color = colors.number))
-
-        // Keywords
         val cKeywords = "\\b(fun|val|var|class|interface|object|enum|public|private|protected|internal|override|return|if|else|when|while|for|do|try|catch|finally|throw|import|package|null|true|false|this|super|void|int|float|double|boolean|char|long|short|byte|static|final|new|const|struct|typedef|switch|case|break|continue|default|namespace|using)\\b"
         highlightRegex(text, cKeywords, SpanStyle(color = colors.keyword, fontWeight = FontWeight.SemiBold))
-
-        // Line and block comments
         highlightRegex(text, "//.*$|/\\*[\\s\\S]*?\\*/", SpanStyle(color = colors.comment))
     }
 
     private fun AnnotatedString.Builder.highlightJS(text: String, colors: SyntaxColors) {
-        // Strings
         highlightRegex(text, "`[\\s\\S]*?`|\"[^\"]*\"|'[^']*'", SpanStyle(color = colors.string))
-
-        // Numbers
         highlightRegex(text, "\\b\\d+(\\.\\d+)?\\b", SpanStyle(color = colors.number))
-
-        // Keywords
         val jsKeywords = "\\b(const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|default|try|catch|finally|throw|new|class|extends|super|this|import|export|from|as|default|async|await|yield|typeof|instanceof|null|undefined|true|false|interface|type)\\b"
         highlightRegex(text, jsKeywords, SpanStyle(color = colors.keyword, fontWeight = FontWeight.SemiBold))
-
-        // Comments
         highlightRegex(text, "//.*$|/\\*[\\s\\S]*?\\*/", SpanStyle(color = colors.comment))
     }
 
     private fun AnnotatedString.Builder.highlightMarkup(text: String, colors: SyntaxColors) {
-        // Strings (attributes)
         highlightRegex(text, "\"[^\"]*\"|'[^']*'", SpanStyle(color = colors.string))
-
-        // Tags <tag> and </tag>
         highlightRegex(text, "<[/]?[a-zA-Z0-9_-]+", SpanStyle(color = colors.keyword))
         highlightRegex(text, "[/]?>", SpanStyle(color = colors.keyword))
-
-        // Comments <!-- ... -->
         highlightRegex(text, "<!--[\\s\\S]*?-->", SpanStyle(color = colors.comment))
     }
 
     private fun AnnotatedString.Builder.highlightCSS(text: String, colors: SyntaxColors) {
-        // Strings
         highlightRegex(text, "\"[^\"]*\"|'[^']*'", SpanStyle(color = colors.string))
-
-        // Selectors & properties
         highlightRegex(text, "[a-zA-Z-]+(?=\\s*:)", SpanStyle(color = colors.keyword))
-
-        // Values & units
         highlightRegex(text, "\\b\\d+(px|em|rem|%|vh|vw|pt)?\\b|#[0-9a-fA-F]{3,8}", SpanStyle(color = colors.number))
-
-        // Comments
         highlightRegex(text, "/\\*[\\s\\S]*?\\*/", SpanStyle(color = colors.comment))
     }
 
     private fun AnnotatedString.Builder.highlightJSON(text: String, colors: SyntaxColors) {
-        // Keys: "key":
         highlightRegex(text, "\"[^\"]*\"(?=\\s*:)", SpanStyle(color = colors.keyword))
-
-        // String values
         highlightRegex(text, "(?<=:\\s*)\"[^\"]*\"", SpanStyle(color = colors.string))
-
-        // Numbers
         highlightRegex(text, "\\b-?\\d+(\\.\\d+)?\\b", SpanStyle(color = colors.number))
-
-        // Booleans & null
         highlightRegex(text, "\\b(true|false|null)\\b", SpanStyle(color = colors.variable))
     }
 
     private fun AnnotatedString.Builder.highlightShell(text: String, colors: SyntaxColors) {
-        // Strings
         highlightRegex(text, "\"[^\"]*\"|'[^']*'", SpanStyle(color = colors.string))
-
-        // Variables: $VAR, ${VAR}
         highlightRegex(text, "\\$[a-zA-Z0-9_]+|\\$\\{[^}]+\\}", SpanStyle(color = colors.variable))
-
-        // Numbers
         highlightRegex(text, "\\b\\d+\\b", SpanStyle(color = colors.number))
-
-        // Keywords
         val shKeywords = "\\b(if|then|else|elif|fi|case|esac|for|select|while|until|do|done|in|function|return|exit|echo|set|export|local|read|cd|mkdir|rm|cp|mv|cat|grep|sed|awk)\\b"
         highlightRegex(text, shKeywords, SpanStyle(color = colors.keyword, fontWeight = FontWeight.Normal))
-
-        // Comments
         highlightRegex(text, "(?m)^\\s*#.*$|(?<=\\s)#.*$", SpanStyle(color = colors.comment))
+    }
+
+    private fun AnnotatedString.Builder.highlightPHP(text: String, colors: SyntaxColors) {
+        highlightRegex(text, "\"[^\"]*\"|'[^']*'", SpanStyle(color = colors.string))
+        highlightRegex(text, "\\$[a-zA-Z0-9_]+", SpanStyle(color = colors.variable))
+        highlightRegex(text, "\\b\\d+(\\.\\d+)?\\b", SpanStyle(color = colors.number))
+        val phpKeywords = "\\b(function|class|public|private|protected|echo|print|if|else|elseif|while|for|foreach|as|switch|case|break|continue|return|try|catch|finally|throw|new|include|require|include_once|require_once|namespace|use|null|true|false)\\b"
+        highlightRegex(text, phpKeywords, SpanStyle(color = colors.keyword, fontWeight = FontWeight.SemiBold))
+        highlightRegex(text, "//.*$|#.*$|/\\*[\\s\\S]*?\\*/", SpanStyle(color = colors.comment))
+    }
+
+    private fun AnnotatedString.Builder.highlightMarkdown(text: String, colors: SyntaxColors) {
+        // Headers
+        highlightRegex(text, "(?m)^#{1,6}\\s.*$", SpanStyle(color = colors.keyword, fontWeight = FontWeight.Bold))
+        // Code blocks
+        highlightRegex(text, "```[\\s\\S]*?```|`[^`]+`", SpanStyle(color = colors.string))
+        // Links
+        highlightRegex(text, "\\[[^\\]]+\\]\\([^\\)]+\\)", SpanStyle(color = colors.variable))
+        // Blockquotes
+        highlightRegex(text, "(?m)^>\\s.*$", SpanStyle(color = colors.comment))
+    }
+
+    private fun AnnotatedString.Builder.highlightYAML(text: String, colors: SyntaxColors) {
+        // Keys
+        highlightRegex(text, "(?m)^\\s*([a-zA-Z0-9_-]+)(?=:)", SpanStyle(color = colors.keyword))
+        // Strings
+        highlightRegex(text, "\"[^\"]*\"|'[^']*'", SpanStyle(color = colors.string))
+        // Numbers & booleans
+        highlightRegex(text, "\\b(true|false|yes|no|null|\\d+(\\.\\d+)?)\\b", SpanStyle(color = colors.number))
+        // Comments
+        highlightRegex(text, "#.*$", SpanStyle(color = colors.comment))
     }
 
     private fun AnnotatedString.Builder.highlightRegex(

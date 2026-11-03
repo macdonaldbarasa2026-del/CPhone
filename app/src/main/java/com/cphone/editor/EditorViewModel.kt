@@ -5,11 +5,13 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import com.cphone.editor.model.EditorSettings
+import com.cphone.editor.model.EditorTab
 import com.cphone.editor.model.SupportedLanguage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.util.UUID
 
 class EditorViewModel : ViewModel() {
 
@@ -52,24 +54,23 @@ echo [4/4] Refreshing Windows Network Settings...
 """.trimIndent()
     }
 
-    private val undoStack = mutableListOf<TextFieldValue>()
-    private val redoStack = mutableListOf<TextFieldValue>()
-    private var lastRecordedText: String = DEFAULT_CODE
+    private val undoStacks = mutableMapOf<String, MutableList<TextFieldValue>>()
+    private val redoStacks = mutableMapOf<String, MutableList<TextFieldValue>>()
 
-    private val _editorState = MutableStateFlow(TextFieldValue(DEFAULT_CODE, TextRange(0)))
-    val editorState: StateFlow<TextFieldValue> = _editorState.asStateFlow()
+    private val initialTab = EditorTab(
+        id = UUID.randomUUID().toString(),
+        fileName = "netfetch-broadband-setup.bat",
+        uri = null,
+        state = TextFieldValue(DEFAULT_CODE, TextRange(0)),
+        isModified = false,
+        language = SupportedLanguage.BATCH
+    )
 
-    private val _fileName = MutableStateFlow("netfetch-broadband-setup.bat")
-    val fileName: StateFlow<String> = _fileName.asStateFlow()
+    private val _tabs = MutableStateFlow(listOf(initialTab))
+    val tabs: StateFlow<List<EditorTab>> = _tabs.asStateFlow()
 
-    private val _currentFileUri = MutableStateFlow<Uri?>(null)
-    val currentFileUri: StateFlow<Uri?> = _currentFileUri.asStateFlow()
-
-    private val _currentLanguage = MutableStateFlow(SupportedLanguage.BATCH)
-    val currentLanguage: StateFlow<SupportedLanguage> = _currentLanguage.asStateFlow()
-
-    private val _isModified = MutableStateFlow(false)
-    val isModified: StateFlow<Boolean> = _isModified.asStateFlow()
+    private val _activeTabId = MutableStateFlow(initialTab.id)
+    val activeTabId: StateFlow<String> = _activeTabId.asStateFlow()
 
     private val _settings = MutableStateFlow(EditorSettings())
     val settings: StateFlow<EditorSettings> = _settings.asStateFlow()
@@ -102,56 +103,85 @@ echo [4/4] Refreshing Windows Network Settings...
     private val _isNewFileDialogOpen = MutableStateFlow(false)
     val isNewFileDialogOpen: StateFlow<Boolean> = _isNewFileDialogOpen.asStateFlow()
 
-    val canUndo: Boolean get() = undoStack.isNotEmpty()
-    val canRedo: Boolean get() = redoStack.isNotEmpty()
+    private val _isFileExplorerOpen = MutableStateFlow(false)
+    val isFileExplorerOpen: StateFlow<Boolean> = _isFileExplorerOpen.asStateFlow()
+
+    private val _isAiAssistantOpen = MutableStateFlow(false)
+    val isAiAssistantOpen: StateFlow<Boolean> = _isAiAssistantOpen.asStateFlow()
+
+    private val _isAboutDialogOpen = MutableStateFlow(false)
+    val isAboutDialogOpen: StateFlow<Boolean> = _isAboutDialogOpen.asStateFlow()
+
+    val currentTab: EditorTab
+        get() = _tabs.value.firstOrNull { it.id == _activeTabId.value } ?: _tabs.value.first()
+
+    val currentText: String
+        get() = currentTab.state.text
 
     init {
-        undoStack.add(_editorState.value)
+        getUndoStack(initialTab.id).add(initialTab.state)
+    }
+
+    private fun getUndoStack(id: String): MutableList<TextFieldValue> {
+        return undoStacks.getOrPut(id) { mutableListOf() }
+    }
+
+    private fun getRedoStack(id: String): MutableList<TextFieldValue> {
+        return redoStacks.getOrPut(id) { mutableListOf() }
     }
 
     fun onTextChanged(newValue: TextFieldValue) {
-        val old = _editorState.value
+        val tab = currentTab
+        val old = tab.state
         if (old.text != newValue.text) {
-            _isModified.value = true
-            // Push to undo stack
-            if (undoStack.size > 200) {
-                undoStack.removeAt(0)
-            }
-            undoStack.add(old)
-            redoStack.clear()
-            lastRecordedText = newValue.text
+            val uStack = getUndoStack(tab.id)
+            if (uStack.size > 200) uStack.removeAt(0)
+            uStack.add(old)
+            getRedoStack(tab.id).clear()
 
-            // If search is open, update search matches
+            updateCurrentTab { it.copy(state = newValue, isModified = true) }
+
             if (_isSearchOpen.value && _searchQuery.value.isNotEmpty()) {
                 updateSearchMatches(_searchQuery.value, newValue.text)
             }
+        } else {
+            updateCurrentTab { it.copy(state = newValue) }
         }
-        _editorState.value = newValue
+    }
+
+    private fun updateCurrentTab(transform: (EditorTab) -> EditorTab) {
+        val activeId = _activeTabId.value
+        _tabs.update { list ->
+            list.map { if (it.id == activeId) transform(it) else it }
+        }
     }
 
     fun undo() {
-        if (undoStack.isNotEmpty()) {
-            val current = _editorState.value
-            redoStack.add(current)
-            val previous = undoStack.removeAt(undoStack.lastIndex)
-            _editorState.value = previous
-            _isModified.value = true
+        val tab = currentTab
+        val uStack = getUndoStack(tab.id)
+        if (uStack.isNotEmpty()) {
+            val current = tab.state
+            getRedoStack(tab.id).add(current)
+            val previous = uStack.removeAt(uStack.lastIndex)
+            updateCurrentTab { it.copy(state = previous, isModified = true) }
         }
     }
 
     fun redo() {
-        if (redoStack.isNotEmpty()) {
-            val current = _editorState.value
-            undoStack.add(current)
-            val next = redoStack.removeAt(redoStack.lastIndex)
-            _editorState.value = next
-            _isModified.value = true
+        val tab = currentTab
+        val rStack = getRedoStack(tab.id)
+        if (rStack.isNotEmpty()) {
+            val current = tab.state
+            getUndoStack(tab.id).add(current)
+            val next = rStack.removeAt(rStack.lastIndex)
+            updateCurrentTab { it.copy(state = next, isModified = true) }
         }
     }
 
     fun selectAll() {
-        val len = _editorState.value.text.length
-        _editorState.value = _editorState.value.copy(selection = TextRange(0, len))
+        val tab = currentTab
+        val len = tab.state.text.length
+        updateCurrentTab { it.copy(state = it.state.copy(selection = TextRange(0, len))) }
     }
 
     fun toggleTheme() {
@@ -160,6 +190,84 @@ echo [4/4] Refreshing Windows Network Settings...
 
     fun updateSettings(newSettings: EditorSettings) {
         _settings.value = newSettings
+    }
+
+    // Tabs Management
+    fun selectTab(id: String) {
+        _activeTabId.value = id
+    }
+
+    fun closeTab(id: String) {
+        val currentList = _tabs.value
+        if (currentList.size <= 1) return
+
+        val closeIndex = currentList.indexOfFirst { it.id == id }
+        val newList = currentList.filterNot { it.id == id }
+        _tabs.value = newList
+
+        if (_activeTabId.value == id) {
+            val newActiveIndex = if (closeIndex >= newList.size) newList.size - 1 else closeIndex
+            _activeTabId.value = newList[newActiveIndex].id
+        }
+
+        undoStacks.remove(id)
+        redoStacks.remove(id)
+    }
+
+    fun openNewTab(name: String, content: String = "", uri: Uri? = null) {
+        // If file is already open, switch to that tab
+        if (uri != null) {
+            val existing = _tabs.value.firstOrNull { it.uri == uri }
+            if (existing != null) {
+                _activeTabId.value = existing.id
+                return
+            }
+        }
+
+        val newTab = EditorTab(
+            id = UUID.randomUUID().toString(),
+            fileName = name,
+            uri = uri,
+            state = TextFieldValue(content, TextRange(0)),
+            isModified = false,
+            language = SupportedLanguage.detect(name)
+        )
+        getUndoStack(newTab.id).add(newTab.state)
+
+        _tabs.update { it + newTab }
+        _activeTabId.value = newTab.id
+    }
+
+    fun markSaved(uri: Uri? = null, name: String? = null) {
+        updateCurrentTab { tab ->
+            tab.copy(
+                isModified = false,
+                uri = uri ?: tab.uri,
+                fileName = name ?: tab.fileName,
+                language = if (name != null) SupportedLanguage.detect(name) else tab.language
+            )
+        }
+    }
+
+    fun resetToDefault() {
+        openNewTab("netfetch-broadband-setup.bat", DEFAULT_CODE, null)
+    }
+
+    fun insertTextAtCursor(textToInsert: String) {
+        val tab = currentTab
+        val currentText = tab.state.text
+        val selection = tab.state.selection
+        val newText = if (selection.collapsed) {
+            currentText.substring(0, selection.start) + textToInsert + currentText.substring(selection.start)
+        } else {
+            currentText.replaceRange(selection.min, selection.max, textToInsert)
+        }
+        val newCursor = selection.min + textToInsert.length
+        onTextChanged(TextFieldValue(newText, TextRange(newCursor)))
+    }
+
+    fun replaceEntireFile(newContent: String) {
+        onTextChanged(TextFieldValue(newContent, TextRange(0)))
     }
 
     // Search & Replace
@@ -176,7 +284,7 @@ echo [4/4] Refreshing Windows Network Settings...
 
     fun onSearchQueryChanged(query: String) {
         _searchQuery.value = query
-        updateSearchMatches(query, _editorState.value.text)
+        updateSearchMatches(query, currentTab.state.text)
     }
 
     fun onReplaceQueryChanged(query: String) {
@@ -226,9 +334,9 @@ echo [4/4] Refreshing Windows Network Settings...
         val idx = _currentMatchIndex.value
         if (idx in matches.indices) {
             val range = matches[idx]
-            _editorState.value = _editorState.value.copy(
-                selection = TextRange(range.first, range.last + 1)
-            )
+            updateCurrentTab { tab ->
+                tab.copy(state = tab.state.copy(selection = TextRange(range.first, range.last + 1)))
+            }
         }
     }
 
@@ -237,7 +345,7 @@ echo [4/4] Refreshing Windows Network Settings...
         val idx = _currentMatchIndex.value
         if (matches.isNotEmpty() && idx in matches.indices) {
             val range = matches[idx]
-            val text = _editorState.value.text
+            val text = currentTab.state.text
             val newText = text.replaceRange(range.first, range.last + 1, _replaceQuery.value)
             onTextChanged(
                 TextFieldValue(
@@ -252,58 +360,17 @@ echo [4/4] Refreshing Windows Network Settings...
     fun replaceAll() {
         val query = _searchQuery.value
         if (query.isEmpty()) return
-        val text = _editorState.value.text
+        val text = currentTab.state.text
         val newText = text.replace(query, _replaceQuery.value, ignoreCase = true)
         onTextChanged(TextFieldValue(newText, TextRange(0)))
         updateSearchMatches(query, newText)
-    }
-
-    // File handling
-    fun openFile(name: String, content: String, uri: Uri?) {
-        _fileName.value = name
-        _currentFileUri.value = uri
-        _currentLanguage.value = SupportedLanguage.detect(name)
-        _editorState.value = TextFieldValue(content, TextRange(0))
-        undoStack.clear()
-        redoStack.clear()
-        undoStack.add(_editorState.value)
-        _isModified.value = false
-    }
-
-    fun newFile(name: String) {
-        val actualName = if (name.isBlank()) "untitled.bat" else name
-        _fileName.value = actualName
-        _currentFileUri.value = null
-        _currentLanguage.value = SupportedLanguage.detect(actualName)
-        _editorState.value = TextFieldValue("", TextRange(0))
-        undoStack.clear()
-        redoStack.clear()
-        undoStack.add(_editorState.value)
-        _isModified.value = false
-    }
-
-    fun markSaved(uri: Uri? = null, name: String? = null) {
-        _isModified.value = false
-        if (uri != null) _currentFileUri.value = uri
-        if (name != null) {
-            _fileName.value = name
-            _currentLanguage.value = SupportedLanguage.detect(name)
-        }
-    }
-
-    fun resetToDefault() {
-        _fileName.value = "netfetch-broadband-setup.bat"
-        _currentFileUri.value = null
-        _currentLanguage.value = SupportedLanguage.BATCH
-        _editorState.value = TextFieldValue(DEFAULT_CODE, TextRange(0))
-        undoStack.clear()
-        redoStack.clear()
-        undoStack.add(_editorState.value)
-        _isModified.value = false
     }
 
     // Dialog toggles
     fun setInfoDialogOpen(open: Boolean) { _isInfoDialogOpen.value = open }
     fun setSettingsDialogOpen(open: Boolean) { _isSettingsDialogOpen.value = open }
     fun setNewFileDialogOpen(open: Boolean) { _isNewFileDialogOpen.value = open }
+    fun setFileExplorerOpen(open: Boolean) { _isFileExplorerOpen.value = open }
+    fun setAiAssistantOpen(open: Boolean) { _isAiAssistantOpen.value = open }
+    fun setAboutDialogOpen(open: Boolean) { _isAboutDialogOpen.value = open }
 }

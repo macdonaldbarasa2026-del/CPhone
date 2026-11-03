@@ -47,3 +47,13 @@ jobs:
           name: cphone-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
+
+      - name: Release Latest APK
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "CPhone Latest APK"
+          body: "Latest CPhone APK build with in-app compiler for HTML, Python, JS, Markdown, conditional Play button, and keyboard typing fix."
+          files: app/build/outputs/apk/debug/*.apk
+          prerelease: false

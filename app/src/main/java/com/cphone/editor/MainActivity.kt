@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                viewModel.openFile(name, content, uri)
+                viewModel.openNewTab(name, content, uri)
             } catch (_: Exception) {
                 // Keep default on read error
             }

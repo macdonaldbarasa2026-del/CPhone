@@ -214,6 +214,8 @@ echo [4/4] Refreshing Windows Network Settings...
         redoStacks.remove(id)
     }
 
+    fun openFile(name: String, content: String, uri: Uri? = null) = openNewTab(name, content, uri)
+
     fun openNewTab(name: String, content: String = "", uri: Uri? = null) {
         // If file is already open, switch to that tab
         if (uri != null) {

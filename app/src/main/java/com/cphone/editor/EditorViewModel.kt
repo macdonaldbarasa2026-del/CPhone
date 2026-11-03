@@ -173,6 +173,43 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         updateCurrentTab { it.copy(state = it.state.copy(selection = TextRange(0, it.state.text.length))) }
     }
 
+    fun moveCursorUp() {
+        val tab = currentTab
+        val text = tab.state.text
+        val pos = tab.state.selection.start
+        val lineStart = text.lastIndexOf('\n', (pos - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+        val col = pos - lineStart
+        if (lineStart > 0) {
+            val prevLineEnd = lineStart - 1
+            val prevLineStart = text.lastIndexOf('\n', (prevLineEnd - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+            val prevLineLen = prevLineEnd - prevLineStart
+            val newPos = prevLineStart + minOf(col, prevLineLen)
+            onTextChanged(tab.state.copy(selection = TextRange(newPos.coerceIn(0, text.length))))
+        }
+    }
+
+    fun moveCursorDown() {
+        val tab = currentTab
+        val text = tab.state.text
+        val pos = tab.state.selection.start
+        val lineStart = text.lastIndexOf('\n', (pos - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+        val col = pos - lineStart
+        val nextLineStart = text.indexOf('\n', pos)
+        if (nextLineStart != -1) {
+            val nextLineEnd = text.indexOf('\n', nextLineStart + 1).let { if (it < 0) text.length else it }
+            val nextLineLen = nextLineEnd - (nextLineStart + 1)
+            val newPos = (nextLineStart + 1) + minOf(col, nextLineLen)
+            onTextChanged(tab.state.copy(selection = TextRange(newPos.coerceIn(0, text.length))))
+        }
+    }
+
+    fun renameCurrentTab(newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) return
+        val newLang = SupportedLanguage.detect(trimmed)
+        updateCurrentTab { it.copy(fileName = trimmed, language = newLang, isModified = true) }
+    }
+
     // ── Tab management ───────────────────────────────────────────────────────
     fun openNewTab(name: String, content: String, uri: Uri? = null) {
         // If the only tab is the blank untitled, replace it
@@ -327,13 +364,15 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // ── Dialog toggles ───────────────────────────────────────────────────────
-    private val _isInfoOpen     = MutableStateFlow(false)
-    private val _isSettingsOpen = MutableStateFlow(false)
-    private val _isNewFileOpen  = MutableStateFlow(false)
-    private val _isExplorerOpen = MutableStateFlow(false)
-    private val _isAiOpen       = MutableStateFlow(false)
-    private val _isAboutOpen    = MutableStateFlow(false)
-    private val _isRecentOpen   = MutableStateFlow(false)
+    private val _isInfoOpen       = MutableStateFlow(false)
+    private val _isSettingsOpen   = MutableStateFlow(false)
+    private val _isNewFileOpen    = MutableStateFlow(false)
+    private val _isExplorerOpen   = MutableStateFlow(false)
+    private val _isAiOpen         = MutableStateFlow(false)
+    private val _isAboutOpen      = MutableStateFlow(false)
+    private val _isRecentOpen     = MutableStateFlow(false)
+    private val _isCodeRunnerOpen = MutableStateFlow(false)
+    private val _isRenameOpen     = MutableStateFlow(false)
 
     val isInfoDialogOpen:     StateFlow<Boolean> = _isInfoOpen.asStateFlow()
     val isSettingsDialogOpen: StateFlow<Boolean> = _isSettingsOpen.asStateFlow()
@@ -342,12 +381,16 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     val isAiAssistantOpen:    StateFlow<Boolean> = _isAiOpen.asStateFlow()
     val isAboutDialogOpen:    StateFlow<Boolean> = _isAboutOpen.asStateFlow()
     val isRecentFilesOpen:    StateFlow<Boolean> = _isRecentOpen.asStateFlow()
+    val isCodeRunnerOpen:     StateFlow<Boolean> = _isCodeRunnerOpen.asStateFlow()
+    val isRenameDialogOpen:   StateFlow<Boolean> = _isRenameOpen.asStateFlow()
 
-    fun setInfoDialogOpen(v: Boolean)     { _isInfoOpen.value = v }
-    fun setSettingsDialogOpen(v: Boolean) { _isSettingsOpen.value = v }
-    fun setNewFileDialogOpen(v: Boolean)  { _isNewFileOpen.value = v }
-    fun setFileExplorerOpen(v: Boolean)   { _isExplorerOpen.value = v }
-    fun setAiAssistantOpen(v: Boolean)    { _isAiOpen.value = v }
-    fun setAboutDialogOpen(v: Boolean)    { _isAboutOpen.value = v }
-    fun setRecentFilesOpen(v: Boolean)    { _isRecentOpen.value = v }
+    fun setInfoDialogOpen(v: Boolean)       { _isInfoOpen.value = v }
+    fun setSettingsDialogOpen(v: Boolean)   { _isSettingsOpen.value = v }
+    fun setNewFileDialogOpen(v: Boolean)    { _isNewFileOpen.value = v }
+    fun setFileExplorerOpen(v: Boolean)     { _isExplorerOpen.value = v }
+    fun setAiAssistantOpen(v: Boolean)      { _isAiOpen.value = v }
+    fun setAboutDialogOpen(v: Boolean)      { _isAboutOpen.value = v }
+    fun setRecentFilesOpen(v: Boolean)      { _isRecentOpen.value = v }
+    fun setCodeRunnerOpen(v: Boolean)       { _isCodeRunnerOpen.value = v }
+    fun setRenameDialogOpen(v: Boolean)     { _isRenameOpen.value = v }
 }

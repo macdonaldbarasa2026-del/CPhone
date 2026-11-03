@@ -21,10 +21,18 @@ enum class SupportedLanguage(
     YAML("YAML", listOf("yaml", "yml")),
     PLAINTEXT("Plain Text", listOf("txt", "log", "conf", "ini"));
 
+    val isRunnable: Boolean
+        get() = this in listOf(HTML, PYTHON, JAVASCRIPT, MARKDOWN)
+
     companion object {
         fun detect(fileName: String): SupportedLanguage {
             val ext = fileName.substringAfterLast('.', "").lowercase()
             return entries.firstOrNull { it.extensions.contains(ext) } ?: PLAINTEXT
+        }
+
+        fun isRunnable(fileName: String): Boolean {
+            val ext = fileName.substringAfterLast('.', "").lowercase()
+            return ext in listOf("html", "htm", "py", "pyw", "js", "mjs", "md", "markdown")
         }
     }
 }

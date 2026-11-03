@@ -22,14 +22,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Phone-optimised 2-row bottom action bar.
+ * Phone-optimised 3-tier bottom action bar inspired by Acode and mobile IDEs.
  *
- * Row 1 – Editor actions: cursor movement, undo/redo, find, save.
- * Row 2 – Special characters that are painful to reach on a phone keyboard:
- *          braces, parens, brackets, operators, punctuation.
- *
- * Both rows scroll horizontally so nothing is clipped.
- * onInsertText is called with the character(s) to insert at cursor position.
+ * Row 1 – Editor actions: cursor movement (left, right, up, down), undo/redo, find, save, select all.
+ * Row 2 – Special characters (brackets, parens, braces, quotes, semicolon).
+ * Row 3 – Common operators and symbols (=, ==, !=, +, -, *, /, <, >, &, |, etc.).
  */
 @Composable
 fun EditorBottomBar(
@@ -41,6 +38,9 @@ fun EditorBottomBar(
     onSave: () -> Unit,
     onMoveCursorLeft: () -> Unit,
     onMoveCursorRight: () -> Unit,
+    onMoveCursorUp: () -> Unit = {},
+    onMoveCursorDown: () -> Unit = {},
+    onSelectAll: () -> Unit = {},
     onInsertText: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -52,25 +52,24 @@ fun EditorBottomBar(
     val bracketColor= Color(0xFFC678DD)   // purple – square brackets
     val dividerColor= if (isDarkMode) Color(0xFF3E4451) else Color(0xFFCDD5E0)
 
-    // Rows of special characters: label visible on key → text inserted in editor
     val row1Chars = listOf(
-        "⇥ Tab"  to "\t",
-        "{"  to "{",
-        "}"  to "}",
-        "("  to "(",
-        ")"  to ")",
-        "["  to "[",
-        "]"  to "]",
-        ";"  to ";",
-        ":"  to ":",
-        ","  to ",",
-        "."  to ".",
+        "⇥ Tab" to "\t",
+        "{" to "{",
+        "}" to "}",
+        "(" to "(",
+        ")" to ")",
+        "[" to "[",
+        "]" to "]",
+        ";" to ";",
+        ":" to ":",
+        "," to ",",
+        "." to ".",
         "\"" to "\"",
-        "'"  to "'",
-        "`"  to "`"
+        "'" to "'",
+        "`" to "`"
     )
     val row2Chars = listOf(
-        "="  to "=",
+        "=" to "=",
         "==" to "==",
         "!=" to "!=",
         "+=" to "+=",
@@ -80,23 +79,23 @@ fun EditorBottomBar(
         "=>" to "=>",
         "->" to "->",
         "::" to "::",
-        "!"  to "!",
-        "&"  to "&",
-        "|"  to "|",
-        "^"  to "^",
-        "~"  to "~",
-        "#"  to "#",
-        "@"  to "@",
+        "!" to "!",
+        "&" to "&",
+        "|" to "|",
+        "^" to "^",
+        "~" to "~",
+        "#" to "#",
+        "@" to "@",
         "\$" to "\$",
-        "%"  to "%",
+        "%" to "%",
         "\\" to "\\",
-        "/"  to "/",
-        "*"  to "*",
-        "+"  to "+",
-        "-"  to "-",
-        "<"  to "<",
-        ">"  to ">",
-        "_"  to "_"
+        "/" to "/",
+        "*" to "*",
+        "+" to "+",
+        "-" to "-",
+        "<" to "<",
+        ">" to ">",
+        "_" to "_"
     )
 
     Surface(
@@ -119,8 +118,8 @@ fun EditorBottomBar(
                 // Cursor movement
                 ActionIconBtn(Icons.Default.KeyboardArrowLeft,  "Move Left",  iconColor, onMoveCursorLeft)
                 ActionIconBtn(Icons.Default.KeyboardArrowRight, "Move Right", iconColor, onMoveCursorRight)
-                ActionIconBtn(Icons.Default.KeyboardArrowUp,    "Move Up",    iconColor) { onInsertText("") }
-                ActionIconBtn(Icons.Default.KeyboardArrowDown,  "Move Down",  iconColor) { onInsertText("") }
+                ActionIconBtn(Icons.Default.KeyboardArrowUp,    "Move Up",    iconColor, onMoveCursorUp)
+                ActionIconBtn(Icons.Default.KeyboardArrowDown,  "Move Down",  iconColor, onMoveCursorDown)
                 BarDivider(dividerColor)
                 // Undo / Redo
                 ActionIconBtn(Icons.AutoMirrored.Filled.Undo, "Undo", iconColor, onUndo)
@@ -131,7 +130,7 @@ fun EditorBottomBar(
                 ActionIconBtn(Icons.Default.Save,   "Save",  iconColor, onSave)
                 BarDivider(dividerColor)
                 // Select all
-                ActionIconBtn(Icons.Default.SelectAll, "Select All", iconColor) { onInsertText("") }
+                ActionIconBtn(Icons.Default.SelectAll, "Select All", iconColor, onSelectAll)
             }
 
             HorizontalDivider(color = dividerColor, thickness = 0.5.dp)
@@ -148,12 +147,14 @@ fun EditorBottomBar(
             ) {
                 row1Chars.forEach { (label, value) ->
                     val textColor = when (label) {
-                        "{", "}"   -> accentColor
-                        "(", ")"   -> accentColor
-                        "[", "]"   -> bracketColor
-                        else       -> iconColor
+                        "{", "}" -> accentColor
+                        "(", ")" -> accentColor
+                        "[", "]" -> bracketColor
+                        else     -> iconColor
                     }
-                    SpecialKey(label, keyBg, textColor) { onInsertText(value) }
+                    SpecialKey(label, keyBg, textColor) {
+                        if (value == "\t") onTab() else onInsertText(value)
+                    }
                 }
             }
 
@@ -176,8 +177,6 @@ fun EditorBottomBar(
         }
     }
 }
-
-// ── Composable helpers ────────────────────────────────────────────────────────
 
 @Composable
 private fun ActionIconBtn(

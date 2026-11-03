@@ -25,7 +25,7 @@ fun CPhoneApp(
     val context = LocalContext.current
     val tabs by viewModel.tabs.collectAsState()
     val activeTabId by viewModel.activeTabId.collectAsState()
-    val activeTab = viewModel.currentTab
+    val activeTab = tabs.firstOrNull { it.id == activeTabId } ?: tabs.firstOrNull() ?: viewModel.currentTab
     val settings by viewModel.settings.collectAsState()
 
     // Dialog & Bar states
@@ -42,6 +42,8 @@ fun CPhoneApp(
     val isFileExplorerOpen by viewModel.isFileExplorerOpen.collectAsState()
     val isAiAssistantOpen by viewModel.isAiAssistantOpen.collectAsState()
     val isAboutDialogOpen by viewModel.isAboutDialogOpen.collectAsState()
+    val isCodeRunnerOpen by viewModel.isCodeRunnerOpen.collectAsState()
+    val isRenameDialogOpen by viewModel.isRenameDialogOpen.collectAsState()
 
     var tabToCloseId by remember { mutableStateOf<String?>(null) }
 
@@ -143,6 +145,9 @@ fun CPhoneApp(
                 TopNavigationBar(
                     fileName = if (activeTab.isModified) "${activeTab.fileName} ●" else activeTab.fileName,
                     isDarkMode = isDark,
+                    isRunnable = com.cphone.editor.model.SupportedLanguage.isRunnable(activeTab.fileName),
+                    onPlayClick = { viewModel.setCodeRunnerOpen(true) },
+                    onTitleClick = { viewModel.setRenameDialogOpen(true) },
                     onHomeClick = { viewModel.setFileExplorerOpen(true) },
                     onInfoClick = { viewModel.setInfoDialogOpen(true) },
                     onThemeToggleClick = { viewModel.toggleTheme() },
@@ -189,6 +194,9 @@ fun CPhoneApp(
                 onSave = { saveCurrentFile() },
                 onMoveCursorLeft = { moveCursorLeft() },
                 onMoveCursorRight = { moveCursorRight() },
+                onMoveCursorUp = { viewModel.moveCursorUp() },
+                onMoveCursorDown = { viewModel.moveCursorDown() },
+                onSelectAll = { viewModel.selectAll() },
                 onInsertText = { viewModel.insertTextAtCursor(it) },
                 modifier = Modifier.navigationBarsPadding() // ← clears nav bar / gesture area
             )
@@ -298,6 +306,27 @@ fun CPhoneApp(
 
         if (isAboutDialogOpen) {
             AboutDialog(onDismiss = { viewModel.setAboutDialogOpen(false) })
+        }
+
+        if (isCodeRunnerOpen) {
+            CodeRunnerDialog(
+                fileName = activeTab.fileName,
+                code = activeTab.state.text,
+                language = activeTab.language,
+                isDarkMode = isDark,
+                onDismiss = { viewModel.setCodeRunnerOpen(false) }
+            )
+        }
+
+        if (isRenameDialogOpen) {
+            RenameFileDialog(
+                currentName = activeTab.fileName,
+                onConfirm = { newName ->
+                    viewModel.renameCurrentTab(newName)
+                    viewModel.setRenameDialogOpen(false)
+                },
+                onDismiss = { viewModel.setRenameDialogOpen(false) }
+            )
         }
 
         // Confirm close unsaved tab

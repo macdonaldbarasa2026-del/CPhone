@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -38,12 +39,12 @@ import kotlin.math.max
  *
  * Features:
  *  - VSCode One Dark Pro / GitHub Light colour scheme
- *  - Syntax highlighting via VisualTransformation
- *  - Line numbers gutter (synced scroll)
+ *  - Syntax highlighting via VisualTransformation (reactive to typing)
+ *  - Line numbers gutter with synchronized vertical scroll
  *  - Alternating row bands
  *  - Auto-indentation on Enter
  *  - Bracket / quote auto-close
- *  - Phone-keyboard friendly: no auto-correct, no capitalisation, Ascii keyboard
+ *  - Phone-keyboard friendly: no auto-correct, no auto-caps, standard Text keyboard
  */
 @Composable
 fun CodeEditorArea(
@@ -65,7 +66,7 @@ fun CodeEditorArea(
     val gutterDivColor  = if (isDarkMode) Color(0xFF2D2D3F) else Color(0xFFDDE4EC)
     val accentBar       = if (isDarkMode) Color(0xFF528BFF) else Color(0xFF1565C0)
     val cursorColor     = if (isDarkMode) Color(0xFFAEAFFD) else Color(0xFF1565C0)
-    val codeTextColor   = if (isDarkMode) Color(0xFFABB2BF)  else Color(0xFF24292F)
+    val codeTextColor   = if (isDarkMode) Color(0xFFABB2BF) else Color(0xFF24292F)
 
     val text      = textFieldValue.text
     val lineCount = remember(text) {
@@ -90,26 +91,28 @@ fun CodeEditorArea(
     val lineHeightPx = with(density) { lineHeight.toPx() }
     val topPaddingPx = with(density) { 10.dp.toPx() }
 
-    // ── Syntax highlighting ───────────────────────────────────────────────────
-    val highlightedText = remember(text, language, isDarkMode) {
-        SyntaxHighlighter.highlight(text, language, isDarkMode)
-    }
-    val visualTransformation = remember(highlightedText) {
-        VisualTransformation { TransformedText(highlightedText, OffsetMapping.Identity) }
+    // ── Syntax highlighting VisualTransformation ─────────────────────────────
+    // Transforms the incoming text from BasicTextField directly so newly typed
+    // characters are immediately styled without length mismatches or IME drops.
+    val visualTransformation = remember(language, isDarkMode) {
+        VisualTransformation { textToTransform ->
+            val highlighted = SyntaxHighlighter.highlight(textToTransform.text, language, isDarkMode)
+            TransformedText(highlighted, OffsetMapping.Identity)
+        }
     }
 
     val verticalScrollState   = rememberScrollState()
     val horizontalScrollState = rememberScrollState()
 
     val gutterWidth = when {
-        lineCount < 100  -> 40.dp
-        lineCount < 1000 -> 52.dp
-        else             -> 64.dp
+        lineCount < 100  -> 42.dp
+        lineCount < 1000 -> 54.dp
+        else             -> 66.dp
     }
 
     val rowBandModifier = if (settings.alternatingRowBands && lineHeightPx > 0f) {
         Modifier.drawBehind {
-            val totalLines = max(lineCount, (size.height / lineHeightPx).toInt() + 4)
+            val totalLines = max(lineCount, (size.height / lineHeightPx).toInt() + 10)
             for (i in 0 until totalLines) {
                 val y     = topPaddingPx + i * lineHeightPx
                 val color = if (i % 2 == 0) rowEvenColor else rowOddColor
@@ -122,12 +125,13 @@ fun CodeEditorArea(
         modifier = modifier
             .fillMaxSize()
             .background(editorBg)
+            .verticalScroll(verticalScrollState)
     ) {
         // ── Left accent bar (VSCode-style) ────────────────────────────────────
         Box(
             modifier = Modifier
                 .width(3.dp)
-                .fillMaxHeight()
+                .defaultMinSize(minHeight = 800.dp)
                 .background(accentBar)
         )
 
@@ -136,17 +140,16 @@ fun CodeEditorArea(
             Box(
                 modifier = Modifier
                     .width(gutterWidth)
-                    .fillMaxHeight()
-                    .background(gutterBg)
                     .then(rowBandModifier)
+                    .background(gutterBg)
             ) {
-                val gutterStyle  = textStyle.copy(color = gutterTextColor, textAlign = TextAlign.End)
-                val lineNumbers  = remember(lineCount) { (1..lineCount).joinToString("\n") }
+                val gutterStyle = textStyle.copy(color = gutterTextColor, textAlign = TextAlign.End)
+                val lineNumbers = remember(lineCount) { (1..lineCount).joinToString("\n") }
 
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = 10.dp, bottom = 48.dp, end = 8.dp)
+                        .fillMaxWidth()
+                        .padding(top = 10.dp, bottom = 64.dp, end = 8.dp)
                 ) {
                     androidx.compose.material3.Text(
                         text     = lineNumbers,
@@ -159,7 +162,7 @@ fun CodeEditorArea(
             Box(
                 modifier = Modifier
                     .width(1.dp)
-                    .fillMaxHeight()
+                    .defaultMinSize(minHeight = 800.dp)
                     .background(gutterDivColor)
             )
         }
@@ -168,16 +171,14 @@ fun CodeEditorArea(
         val editorModifier = if (settings.wordWrap) {
             Modifier
                 .weight(1f)
-                .fillMaxHeight()
                 .then(rowBandModifier)
-                .padding(top = 10.dp, start = 8.dp, end = 16.dp, bottom = 48.dp)
+                .padding(top = 10.dp, start = 8.dp, end = 16.dp, bottom = 64.dp)
         } else {
             Modifier
                 .weight(1f)
-                .fillMaxHeight()
                 .then(rowBandModifier)
                 .horizontalScroll(horizontalScrollState)
-                .padding(top = 10.dp, start = 8.dp, end = 24.dp, bottom = 48.dp)
+                .padding(top = 10.dp, start = 8.dp, end = 24.dp, bottom = 64.dp)
                 .defaultMinSize(minWidth = 1200.dp)
         }
 
@@ -197,11 +198,10 @@ fun CodeEditorArea(
             cursorBrush    = SolidColor(cursorColor),
             visualTransformation = visualTransformation,
             keyboardOptions = KeyboardOptions(
-                // Critical for phone coding:
-                capitalization = KeyboardCapitalization.None,   // no auto-caps
-                autoCorrect    = false,                          // no auto-correct
-                keyboardType   = KeyboardType.Ascii,             // code keyboard on phones that support it
-                imeAction      = ImeAction.Default               // Enter = actual newline
+                capitalization = KeyboardCapitalization.None,
+                autoCorrect    = false,
+                keyboardType   = KeyboardType.Text,
+                imeAction      = ImeAction.Default
             ),
             maxLines  = Int.MAX_VALUE,
             singleLine = false
@@ -221,7 +221,7 @@ private val OPEN_CLOSE_PAIRS = mapOf(
 
 /**
  * Handles:
- * 1. Auto-indentation when Enter is pressed (matching previous line indent + extra if line ends with { ( [ :)
+ * 1. Auto-indentation when Enter is pressed
  * 2. Bracket/quote auto-closing: typing { inserts {} and places cursor between them
  * 3. Skip-over: if cursor is right before a closing bracket and user types it, just move over
  */
@@ -233,6 +233,8 @@ private fun processKeyInput(
 ): TextFieldValue {
     val oldText = old.text
     val newText = new.text
+
+    if (oldText == newText) return new
 
     // ── Case 1: Enter key → auto-indentation ─────────────────────────────────
     if (newText.length == oldText.length + 1 &&
@@ -249,6 +251,8 @@ private fun processKeyInput(
     if (!new.selection.collapsed) return new
 
     val cursor = new.selection.start
+    if (cursor < 1 || cursor > newText.length) return new
+
     val typed  = newText[cursor - 1]
 
     // Sub-case 2a: opening bracket/quote → insert pair, put cursor between
@@ -256,8 +260,7 @@ private fun processKeyInput(
     if (closer != null) {
         // Don't double-close a quote that's already the next char
         val nextChar = if (cursor < newText.length) newText[cursor] else '\u0000'
-        if (typed == '"' && nextChar == '"') return new
-        if (typed == '\'' && nextChar == '\'') return new
+        if ((typed == '"' || typed == '\'') && nextChar == typed) return new
 
         val updated = newText.substring(0, cursor) + closer + newText.substring(cursor)
         return new.copy(
@@ -268,12 +271,9 @@ private fun processKeyInput(
 
     // Sub-case 2b: closing bracket/quote typed while already present ahead → skip over
     val closers = OPEN_CLOSE_PAIRS.values.toSet()
-    if (typed in closers) {
-        val charBeforeCursor = newText[cursor - 1]  // the char we just inserted
-        // Look at original text: was the char before insertion the same closer?
+    if (typed in closers && cursor < newText.length) {
         val origNextChar = if (cursor - 1 < oldText.length) oldText[cursor - 1] else '\u0000'
         if (origNextChar == typed) {
-            // Remove the typed duplicate, move cursor forward instead
             val restored = newText.substring(0, cursor - 1) + newText.substring(cursor)
             return new.copy(
                 text      = restored,

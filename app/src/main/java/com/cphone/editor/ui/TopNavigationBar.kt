@@ -1,10 +1,12 @@
 package com.cphone.editor.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,6 +24,9 @@ import com.cphone.editor.R
 fun TopNavigationBar(
     fileName: String,
     isDarkMode: Boolean,
+    isRunnable: Boolean = false,
+    onPlayClick: () -> Unit = {},
+    onTitleClick: () -> Unit = {},
     onHomeClick: () -> Unit,
     onInfoClick: () -> Unit,
     onThemeToggleClick: () -> Unit,
@@ -71,7 +76,7 @@ fun TopNavigationBar(
                 )
             }
 
-            // Current filename center-left with ellipsis
+            // Current filename / heading - clickable to rename or change extension
             Text(
                 text = fileName,
                 fontSize = 17.sp,
@@ -81,8 +86,25 @@ fun TopNavigationBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .weight(1f)
+                    .clickable { onTitleClick() }
                     .padding(horizontal = 6.dp)
             )
+
+            // Play / Run button (compiler/runner for lighter languages: HTML, Python, JS, Markdown)
+            // Only appears if the typed heading/title has runnable extension (e.g. .html, .py, .js, .md)
+            if (isRunnable) {
+                IconButton(
+                    onClick = onPlayClick,
+                    modifier = Modifier.size(42.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Run / Preview",
+                        tint = Color(0xFF4CAF50), // Acode-style vibrant green
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
 
             // AI Assistant action icon
             IconButton(
@@ -142,6 +164,17 @@ fun TopNavigationBar(
                     onDismissRequest = { menuExpanded = false },
                     modifier = Modifier.background(if (isDarkMode) Color(0xFF2A2A2A) else Color(0xFFFFFFFF))
                 ) {
+                    if (isRunnable) {
+                        DropdownMenuItem(
+                            text = { Text("Run / Preview (▶)") },
+                            onClick = { menuExpanded = false; onPlayClick() }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Rename File") },
+                        onClick = { menuExpanded = false; onTitleClick() }
+                    )
+                    HorizontalDivider(color = dividerColor)
                     DropdownMenuItem(
                         text = { Text("New File") },
                         onClick = { menuExpanded = false; onNewFileClick() }
@@ -201,7 +234,7 @@ fun TopNavigationBar(
             }
         }
 
-        // Subtle light-grey divider underneath
+        // Subtle divider underneath
         HorizontalDivider(
             color = dividerColor,
             thickness = 1.dp,

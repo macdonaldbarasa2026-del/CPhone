@@ -308,8 +308,7 @@ fun CPhoneApp(
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            CodeMirrorEditorArea(
-                documentId = activeTab.id,
+            CodeEditorArea(
                 textFieldValue = activeTab.state,
                 onValueChange = { viewModel.onTextChanged(it) },
                 language = activeTab.language,

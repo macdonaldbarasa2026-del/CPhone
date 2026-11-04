@@ -23,14 +23,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -385,51 +384,39 @@ fun CodeEditorArea(
             )
         }
 
-        // ── Vertical "⚠ Problems" Tab on the Top-Right Edge (matching screenshot) ──
-        Surface(
-            color = Color(0xFF9A3412),
-            shape = RoundedCornerShape(topStart = 6.dp, bottomStart = 6.dp),
-            shadowElevation = 4.dp,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 8.dp)
-                .clickable {
-                    val targetLine = diagnostics.firstOrNull()?.line ?: currentLine
-                    onBugLineClicked(targetLine)
-                }
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+        // ── Horizontal "⚠ Problems" pill on the Top-Right Edge ──────────────
+        // Flat horizontal badge — saves vertical space for code, no rotation tricks
+        if (diagnostics.isNotEmpty()) {
+            Surface(
+                color = Color(0xFF9A3412),
+                shape = RoundedCornerShape(bottomStart = 8.dp, topStart = 8.dp),
+                shadowElevation = 4.dp,
                 modifier = Modifier
-                    .layout { measurable, constraints ->
-                        val placeable = measurable.measure(constraints)
-                        layout(placeable.height, placeable.width) {
-                            placeable.place(
-                                x = -(placeable.width - placeable.height) / 2,
-                                y = (placeable.width - placeable.height) / 2
-                            )
-                        }
+                    .align(Alignment.TopEnd)
+                    .padding(top = 6.dp)
+                    .clickable {
+                        val targetLine = diagnostics.firstOrNull()?.line ?: currentLine
+                        onBugLineClicked(targetLine)
                     }
-                    .graphicsLayer { rotationZ = 90f }
-                    .padding(horizontal = 8.dp, vertical = 3.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = "Problems",
-                    tint = Color.White,
-                    modifier = Modifier.size(12.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                val problemText = if (diagnostics.isNotEmpty()) {
-                    "Problems (${diagnostics.size})"
-                } else {
-                    "Problems"
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Problems",
+                        tint = Color.White,
+                        modifier = Modifier.size(11.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = "⚠ ${diagnostics.size}",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
-                Text(
-                    text = problemText,
-                    color = Color.White,
-                    fontSize = 11.sp
-                )
             }
         }
     }

@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "build:editor": "node node_modules/esbuild/bin/esbuild app/src/main/web/editor/editor.js --bundle --format=iife --target=es2020 --outfile=app/build/generated/editorAssets/editor/editor.js"
+    "build:editor": "node scripts/build-editor.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

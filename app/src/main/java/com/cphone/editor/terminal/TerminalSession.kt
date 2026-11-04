@@ -87,7 +87,7 @@ class TerminalSession(private val context: Context) {
             // Read stdout
             coroutineScope.launch {
                 val reader = BufferedReader(InputStreamReader(proc.inputStream, Charsets.UTF_8))
-                var line: String?
+                var line: String? = null
                 while (isRunning.get() && reader.readLine().also { line = it } != null) {
                     line?.let { appendLine(it, isError = false) }
                 }
@@ -96,7 +96,7 @@ class TerminalSession(private val context: Context) {
             // Read stderr
             coroutineScope.launch {
                 val errorReader = BufferedReader(InputStreamReader(proc.errorStream, Charsets.UTF_8))
-                var errLine: String?
+                var errLine: String? = null
                 while (isRunning.get() && errorReader.readLine().also { errLine = it } != null) {
                     errLine?.let { appendLine(it, isError = true) }
                 }

@@ -106,14 +106,14 @@ fun CodeMirrorEditorView(
                 isHorizontalScrollBarEnabled = false
                 isFocusable = true
                 isFocusableInTouchMode = true
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = false
-                settings.allowFileAccess = false
-                settings.allowContentAccess = false
-                settings.allowFileAccessFromFileURLs = false
-                settings.allowUniversalAccessFromFileURLs = false
-                settings.javaScriptCanOpenWindowsAutomatically = false
-                settings.setSupportMultipleWindows(false)
+                this.settings.javaScriptEnabled = true
+                this.settings.domStorageEnabled = false
+                this.settings.allowFileAccess = false
+                this.settings.allowContentAccess = false
+                this.settings.allowFileAccessFromFileURLs = false
+                this.settings.allowUniversalAccessFromFileURLs = false
+                this.settings.javaScriptCanOpenWindowsAutomatically = false
+                this.settings.setSupportMultipleWindows(false)
                 addJavascriptInterface(bridge, "AndroidEditor")
                 webViewClient = object : WebViewClient() {
                     override fun shouldInterceptRequest(

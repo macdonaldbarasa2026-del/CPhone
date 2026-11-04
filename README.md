@@ -1,42 +1,47 @@
-# CPhone - Professional Android Code Editor
+# CPhone Studio v2.0 — Commercial Android Code Editor & Mobile IDE
 
-A high-performance, minimalist Android code editor engineered with pixel-level visual fidelity to replicate the clean, modern Android code editing experience.
+A commercial-grade, high-density Android code editor and mobile IDE engineered to rival **Acode** and **VS Code Mobile** with real-time bug inspection, **Code Trails**, multi-language execution, and calibrated mobile ergonomics.
 
 ---
 
-## 📱 Features
+## 🚀 What's New in CPhone v2.0
 
-- **Pixel-Accurate Top Navigation Bar:**
-  - Left Home navigation button.
-  - Center-left filename display with smooth ellipsis truncation (`netfetch-broadband...`).
-  - Outline Information (ⓘ) button for file metadata (path, size, lines, characters, UTF-8 encoding).
-  - Dark/Light theme toggle button featuring the split droplet icon.
-  - Overflow (⋮) action menu.
-  - Crisp light-grey divider underneath.
+### 1. Code Trails & Live Bug Inspector
+- **Live Syntax & Bug Diagnostics (`CodeAnalyzer`)**:
+  - Real-time detection of unclosed brackets `()`, `{}`, `[]`, unclosed string literals, Python indentation (`TabError`) & missing `:` block headers, Python 2 `print` statements, accidental `=` in conditions, JSON trailing commas/parse errors, and mismatched HTML/XML tags.
+  - **Gutter Error Dots & Right-Edge Bug Radar Minimap**: Visual red/amber markers in the line-number gutter and a right-edge minimap showing exact bug and cursor locations across the file.
+  - **One-Tap Bug Pill (`● N` / `✓`)**: Tap the status pill in the top bar to open the **Code Trails & Bug Inspector** sheet and jump straight to the offending line and column.
+- **Code Trail Micro-Bar**:
+  - Displays live breadcrumbs (`fileName › ƒ activeFunction()`), **Cursor Trail Back/Forward (`←` / `→`)** navigation history, `Ln:Col` jump trigger, and instant `A-` / `A+` font calibration controls.
+- **Symbol Outline Drawer**:
+  - Automatically indexes classes, functions, methods, interfaces, HTML structural tags, CSS rules, Markdown headings, and Batch labels for instant jump-to-definition.
 
-- **High-Performance Code Editing Area:**
-  - Distinctive left vertical blue indicator bar.
-  - Dynamic line numbers gutter with clean right alignment and subtle vertical separator.
-  - Pure white background in Light theme, sleek dark background in Dark theme.
-  - Monospaced programming font with comfortable line spacing.
-  - Horizontal scrolling for long lines and synchronized vertical scrolling.
-  - Auto-indentation preserving tabs and block scopes.
+### 2. Renovated In-App Compiler & Multi-Language Runner
+- **Main-Thread Safe WebView Bridge**: Marshals all `@JavascriptInterface` callbacks (`onStdout`, `onError`, `onFinished`, `onConsoleMessage`) onto Android's main UI thread and uses UTF-8 safe `TextDecoder` decoding.
+- **Python 3 (Skulpt) Fixes & Upgrades**:
+  - Interactive **`input()` support** via a pre-supplied Stdin queue or live interactive popup prompt dialog.
+  - **Python Turtle Graphics Canvas (`import turtle`)** support rendered directly inside the runner.
+  - Execution timeout guard (`25s` limit) to prevent infinite loops from freezing the device.
+  - **Jump to Bug Line Button**: Automatically extracts traceback line numbers and lets you jump straight to the buggy line in one tap.
+- **JavaScript & TypeScript V8 Async Runner**:
+  - Built-in TypeScript type-stripping transpiler so `.ts` and `.tsx` files execute directly alongside `.js` and `async/await` scripts.
+- **Multi-Tab HTML + CSS + JS Bundler & DevTools Console**:
+  - Automatically links `<link rel="stylesheet" href="style.css">` and `<script src="app.js"></script>` from your open editor tabs so multi-file web projects run together seamlessly.
+  - Interactive **DevTools JS Console** with live expression evaluation (`eval`).
+- **CSS Live Sandbox & JSON Validator**:
+  - Preview `.css` files against a live component sandbox and validate/pretty-print `.json` files.
 
-- **Multi-Language Syntax Highlighting:**
-  - **Windows Batch / CMD (`.bat`, `.cmd`)**: Blue/cyan commands (`echo`, `reg`, `title`, `set`, `if`), green strings, red digits & IPs (`192.168.49.1`), grey comments.
-  - **Python (`.py`)**
-  - **Java (`.java`)**
-  - **Kotlin (`.kt`, `.kts`)**
-  - **JavaScript & TypeScript (`.js`, `.jsx`, `.ts`, `.tsx`)**
-  - **HTML & XML (`.html`, `.xml`, `.svg`)**
-  - **CSS (`.css`)**
-  - **JSON (`.json`)**
-  - **Shell Scripts (`.sh`, `.bash`)**
-  - **C & C++ (`.c`, `.cpp`, `.h`)**
+### 3. Android Screen Calibration & Maximum Code View Space
+- **Ultra-Compact Calibrated Bottom Dock (`36dp`)**:
+  - Saves vertical screen space when the Android soft keyboard is open, with an `[▲/▼]` toggle to expand the precision cursor D-pad (`←`, `→`, `↑`, `↓`, `Home`, `End`) and line tools (`// Cmt`, `Dup Ln`, `Del Ln`, `Beautify`, `Snippets`).
+- **Zen Fullscreen Mode (`⛶`)**:
+  - One-tap fullscreen toggle in the top bar that collapses tab/trail chrome to dedicate 90%+ of the viewport to code.
+- **Two-Finger Pinch-to-Zoom & Line Density Calibration**:
+  - Pinch directly on the editor canvas or use `A-` / `A+` to calibrate font size (`9sp`–`26sp`) and line spacing (`1.25x`–`1.85x`).
 
-- **Real Editing Engine:**
-  - Full cursor positioning, text selection, and native soft-keyboard support.
-  - 200-level Undo / Redo history stack.
-  - Find and Replace with live match counting and match navigation.
-  - Storage Access Framework (SAF) integration for opening and saving any file on Android without requiring intrusive permissions.
-  - Intent filter handling to open files directly from Android file managers.
+### 4. Acode-Class Power Features
+- **Command Palette (`⌘`)**: Searchable instant access to 20+ IDE commands (*Format Code*, *Go to Line*, *Toggle Comment*, *Duplicate/Delete/Move Line*, *Sort Lines*, *Trim Whitespace*, *Snippets*, *Switch Theme*, *Switch Language*).
+- **6 Commercial IDE Color Themes**:
+  - **One Dark Pro**, **Dracula Pro**, **Monokai Pro**, **Tokyo Night**, **Solarized Dark**, and **GitHub Light**.
+- **20 Supported Languages & Session Auto-Persistence**:
+  - Automatically saves open tabs and unsaved edits across app restarts.

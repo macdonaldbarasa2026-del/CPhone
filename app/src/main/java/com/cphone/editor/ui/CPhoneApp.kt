@@ -5,16 +5,24 @@ import android.os.Environment
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import com.cphone.editor.EditorViewModel
-import java.io.BufferedReader
+import com.cphone.editor.model.SupportedLanguage
+import com.cphone.editor.tools.DiagnosticSeverity
 import java.io.File
-import java.io.InputStreamReader
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,8 +35,18 @@ fun CPhoneApp(
     val activeTabId by viewModel.activeTabId.collectAsState()
     val activeTab = tabs.firstOrNull { it.id == activeTabId } ?: tabs.firstOrNull() ?: viewModel.currentTab
     val settings by viewModel.settings.collectAsState()
+    val isZenMode by viewModel.isZenMode.collectAsState()
 
-    // Dialog & Bar states
+    // Code Trails & Diagnostics states
+    val diagnostics by viewModel.diagnostics.collectAsState()
+    val symbols by viewModel.symbols.collectAsState()
+    val activeSymbol by viewModel.activeSymbol.collectAsState()
+    val cursorLine by viewModel.cursorLine.collectAsState()
+    val cursorColumn by viewModel.cursorColumn.collectAsState()
+    val cursorTrail by viewModel.cursorTrail.collectAsState()
+    val trailIndex by viewModel.trailIndex.collectAsState()
+
+    // Search & Replace states
     val isSearchOpen by viewModel.isSearchOpen.collectAsState()
     val isReplaceMode by viewModel.isReplaceMode.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -36,6 +54,7 @@ fun CPhoneApp(
     val searchMatches by viewModel.searchMatches.collectAsState()
     val currentMatchIndex by viewModel.currentMatchIndex.collectAsState()
 
+    // Dialog & Sheet states
     val isInfoDialogOpen by viewModel.isInfoDialogOpen.collectAsState()
     val isSettingsDialogOpen by viewModel.isSettingsDialogOpen.collectAsState()
     val isNewFileDialogOpen by viewModel.isNewFileDialogOpen.collectAsState()
@@ -44,8 +63,18 @@ fun CPhoneApp(
     val isAboutDialogOpen by viewModel.isAboutDialogOpen.collectAsState()
     val isCodeRunnerOpen by viewModel.isCodeRunnerOpen.collectAsState()
     val isRenameDialogOpen by viewModel.isRenameDialogOpen.collectAsState()
+    val isCommandPaletteOpen by viewModel.isCommandPaletteOpen.collectAsState()
+    val isCodeTrailsOpen by viewModel.isCodeTrailsOpen.collectAsState()
+    val codeTrailsInitialTab by viewModel.codeTrailsInitialTab.collectAsState()
+    val isSnippetsOpen by viewModel.isSnippetsOpen.collectAsState()
+    val isGoToLineOpen by viewModel.isGoToLineOpen.collectAsState()
 
     var tabToCloseId by remember { mutableStateOf<String?>(null) }
+    // By default, symbol buttons ({}, [], etc.) are hidden; tapping the bottom-right '^' circle button reveals/hides them
+    var isSymbolsRevealed by remember { mutableStateOf(false) }
+
+    val bugCount = remember(diagnostics) { diagnostics.count { it.severity == DiagnosticSeverity.ERROR } }
+    val warnCount = remember(diagnostics) { diagnostics.count { it.severity == DiagnosticSeverity.WARNING } }
 
     // ── SAF: Open File ───────────────────────────────────────────────────────
     val openDocumentLauncher = rememberLauncherForActivityResult(
@@ -89,7 +118,6 @@ fun CPhoneApp(
         }
     }
 
-    // ── Save current file ────────────────────────────────────────────────────
     fun saveCurrentFile() {
         val tab = viewModel.currentTab
         if (tab.uri != null) {
@@ -106,48 +134,61 @@ fun CPhoneApp(
         }
     }
 
-    // ── Insert tab at cursor ─────────────────────────────────────────────────
     fun insertTab() {
         viewModel.insertTextAtCursor(" ".repeat(settings.tabSize))
     }
 
-    // ── Move cursor left/right (selection update) ────────────────────────────
     fun moveCursorLeft() {
         val tab = viewModel.currentTab
         val pos = (tab.state.selection.start - 1).coerceAtLeast(0)
-        viewModel.onTextChanged(tab.state.copy(selection = androidx.compose.ui.text.TextRange(pos)))
+        viewModel.onTextChanged(tab.state.copy(selection = TextRange(pos)))
     }
+
     fun moveCursorRight() {
         val tab = viewModel.currentTab
         val pos = (tab.state.selection.start + 1).coerceAtMost(tab.state.text.length)
-        viewModel.onTextChanged(tab.state.copy(selection = androidx.compose.ui.text.TextRange(pos)))
+        viewModel.onTextChanged(tab.state.copy(selection = TextRange(pos)))
     }
 
-    // ── Theme colours ────────────────────────────────────────────────────────
     val isDark = settings.isDarkMode
 
-    // ── Scaffold with proper WindowInsets ───────────────────────────────────
-    // contentWindowInsets = WindowInsets(0) so we handle insets manually
-    // This prevents Scaffold from double-applying padding.
     Scaffold(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            // TopBar sits inside Scaffold's top slot; Scaffold automatically
-            // places it below the status bar when contentWindowInsets is handled.
-            // We add statusBarsPadding() explicitly so it always clears the notch.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()   // ← clears notch / status bar
-                    .displayCutoutPadding() // ← clears camera cutout on all sides
+                    .statusBarsPadding()
+                    .displayCutoutPadding()
             ) {
+                val subtitleText = when {
+                    activeTab.uri == null && activeTab.isModified -> "New file • Modified"
+                    activeTab.uri == null -> "New file"
+                    activeTab.isModified -> "${activeTab.uri.lastPathSegment ?: activeTab.fileName} • Modified"
+                    else -> activeTab.uri.path ?: "Saved file"
+                }
                 TopNavigationBar(
-                    fileName = if (activeTab.isModified) "${activeTab.fileName} ●" else activeTab.fileName,
+                    fileName = activeTab.fileName,
+                    subtitle = subtitleText,
+                    language = activeTab.language,
                     isDarkMode = isDark,
-                    isRunnable = com.cphone.editor.model.SupportedLanguage.isRunnable(activeTab.fileName),
+                    themeId = settings.editorTheme,
+                    isRunnable = SupportedLanguage.isRunnable(activeTab.fileName) || activeTab.language.isRunnable,
+                    isZenMode = isZenMode,
+                    bugCount = bugCount,
+                    warningCount = warnCount,
                     onPlayClick = { viewModel.setCodeRunnerOpen(true) },
                     onTitleClick = { viewModel.setRenameDialogOpen(true) },
+                    onBugPillClick = { viewModel.setCodeTrailsOpen(true, initialTab = 0) },
+                    onCommandPaletteClick = { viewModel.setCommandPaletteOpen(true) },
+                    onToggleZenClick = { viewModel.toggleZenMode() },
+                    onFormatClick = {
+                        viewModel.formatCurrentCode()
+                        Toast.makeText(context, "Code formatted ✓", Toast.LENGTH_SHORT).show()
+                    },
+                    onSnippetsClick = { viewModel.setSnippetsOpen(true) },
+                    onGoToLineClick = { viewModel.setGoToLineOpen(true) },
                     onHomeClick = { viewModel.setFileExplorerOpen(true) },
                     onInfoClick = { viewModel.setInfoDialogOpen(true) },
                     onThemeToggleClick = { viewModel.toggleTheme() },
@@ -166,8 +207,8 @@ fun CPhoneApp(
                     onAboutClick = { viewModel.setAboutDialogOpen(true) }
                 )
 
-                // Multi-file tab bar
-                if (settings.showTabBar && tabs.isNotEmpty()) {
+                // Hide tab bar & code trail bar in Zen Mode to give 90%+ screen area to code view
+                if (!isZenMode && settings.showTabBar && tabs.isNotEmpty()) {
                     EditorTabBar(
                         tabs = tabs,
                         activeTabId = activeTabId,
@@ -178,67 +219,208 @@ fun CPhoneApp(
                             else viewModel.closeTab(id)
                         },
                         onNewTabClick = { viewModel.setNewFileDialogOpen(true) },
-                        isDarkMode = isDark
+                        isDarkMode = isDark,
+                        themeId = settings.editorTheme,
+                        showCodeTrail = settings.showCodeTrailBar,
+                        activeSymbol = activeSymbol,
+                        cursorLine = cursorLine,
+                        cursorColumn = cursorColumn,
+                        fontSizeSp = settings.fontSizeSp,
+                        canNavigateBack = trailIndex > 0,
+                        canNavigateForward = trailIndex in 0 until cursorTrail.lastIndex,
+                        onNavigateBack = { viewModel.navigateTrailBack() },
+                        onNavigateForward = { viewModel.navigateTrailForward() },
+                        onOpenOutline = { viewModel.setCodeTrailsOpen(true, initialTab = 1) },
+                        onOpenGoToLine = { viewModel.setGoToLineOpen(true) },
+                        onFontSizeDelta = { viewModel.adjustFontSize(it) }
                     )
                 }
             }
         },
         bottomBar = {
-            // Bottom action bar clears the navigation bar / gesture bar
             EditorBottomBar(
                 isDarkMode = isDark,
+                themeId = settings.editorTheme,
+                isSymbolsRevealed = isSymbolsRevealed,
                 onUndo = { viewModel.undo() },
                 onRedo = { viewModel.redo() },
                 onTab = { insertTab() },
                 onFind = { viewModel.openSearch(false) },
                 onSave = { saveCurrentFile() },
+                onEsc = {
+                    if (isSearchOpen) viewModel.closeSearch()
+                    else if (isSymbolsRevealed) isSymbolsRevealed = false
+                },
+                onCtrlShortcut = { viewModel.setCommandPaletteOpen(true) },
                 onMoveCursorLeft = { moveCursorLeft() },
                 onMoveCursorRight = { moveCursorRight() },
                 onMoveCursorUp = { viewModel.moveCursorUp() },
                 onMoveCursorDown = { viewModel.moveCursorDown() },
+                onMoveLineStart = { viewModel.moveCursorToLineStart() },
+                onMoveLineEnd = { viewModel.moveCursorToLineEnd() },
+                onToggleComment = { viewModel.toggleLineComment() },
+                onDuplicateLine = { viewModel.duplicateLine() },
+                onDeleteLine = { viewModel.deleteLine() },
+                onFormatCode = {
+                    viewModel.formatCurrentCode()
+                    Toast.makeText(context, "Formatted ✓", Toast.LENGTH_SHORT).show()
+                },
+                onOpenSnippets = { viewModel.setSnippetsOpen(true) },
                 onSelectAll = { viewModel.selectAll() },
                 onInsertText = { viewModel.insertTextAtCursor(it) },
-                modifier = Modifier.navigationBarsPadding() // ← clears nav bar / gesture area
+                modifier = Modifier.navigationBarsPadding()
             )
         }
     ) { innerPadding ->
-        // innerPadding already accounts for topBar + bottomBar heights set by Scaffold
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .imePadding()  // ← pushes content up when keyboard opens
+                .imePadding()
         ) {
-            // Search / Replace Bar
-            if (isSearchOpen) {
-                SearchReplaceBar(
-                    searchQuery = searchQuery,
-                    onSearchQueryChange = { viewModel.onSearchQueryChanged(it) },
-                    replaceQuery = replaceQuery,
-                    onReplaceQueryChange = { viewModel.onReplaceQueryChanged(it) },
-                    isReplaceMode = isReplaceMode,
-                    matchCount = searchMatches.size,
-                    currentMatchIndex = currentMatchIndex,
-                    onFindNext = { viewModel.findNext() },
-                    onFindPrevious = { viewModel.findPrevious() },
-                    onReplace = { viewModel.replaceCurrent() },
-                    onReplaceAll = { viewModel.replaceAll() },
-                    onClose = { viewModel.closeSearch() },
-                    isDarkMode = isDark
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                if (isSearchOpen) {
+                    SearchReplaceBar(
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = { viewModel.onSearchQueryChanged(it) },
+                        replaceQuery = replaceQuery,
+                        onReplaceQueryChange = { viewModel.onReplaceQueryChanged(it) },
+                        isReplaceMode = isReplaceMode,
+                        matchCount = searchMatches.size,
+                        currentMatchIndex = currentMatchIndex,
+                        onFindNext = { viewModel.findNext() },
+                        onFindPrevious = { viewModel.findPrevious() },
+                        onReplace = { viewModel.replaceCurrent() },
+                        onReplaceAll = { viewModel.replaceAll() },
+                        onClose = { viewModel.closeSearch() },
+                        isDarkMode = isDark
+                    )
+                }
+
+                CodeEditorArea(
+                    textFieldValue = activeTab.state,
+                    onValueChange = { viewModel.onTextChanged(it) },
+                    language = activeTab.language,
+                    settings = settings,
+                    diagnostics = diagnostics,
+                    currentLine = cursorLine,
+                    searchQuery = if (isSearchOpen) searchQuery else "",
+                    onFontSizeCalibrated = { newSize ->
+                        viewModel.updateSettings(settings.copy(fontSizeSp = newSize))
+                    },
+                    onBugLineClicked = { viewModel.setCodeTrailsOpen(true, initialTab = 0) },
+                    modifier = Modifier.weight(1f)
                 )
             }
 
-            // Code editor area — fills all remaining space
-            CodeEditorArea(
-                textFieldValue = activeTab.state,
-                onValueChange = { viewModel.onTextChanged(it) },
-                language = activeTab.language,
-                settings = settings,
-                modifier = Modifier.weight(1f)
-            )
+            // ── Floating Circular '^' / 'v' Button at Bottom-Right (Circled in Blue in Screenshot) ──
+            // Default state is hidden; tapping reveals {}, [], (), etc. Tapping again hides them.
+            Surface(
+                onClick = { isSymbolsRevealed = !isSymbolsRevealed },
+                shape = CircleShape,
+                color = if (isDark) Color(0xFF2C313C) else Color.White,
+                contentColor = if (isDark) Color.White else Color(0xFF1F2937),
+                shadowElevation = 6.dp,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (isDark) Color(0xFF4B5563) else Color(0xFFD1D5DB)
+                ),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 18.dp, bottom = 14.dp)
+                    .size(48.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (isSymbolsRevealed) {
+                            Icons.Default.KeyboardArrowDown
+                        } else {
+                            Icons.Default.KeyboardArrowUp
+                        },
+                        contentDescription = if (isSymbolsRevealed) "Hide Symbol Buttons" else "Reveal Symbol Buttons ({} [])",
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
         }
 
         // ── Overlays & Dialogs ───────────────────────────────────────────────
+
+        if (isCommandPaletteOpen) {
+            CommandPaletteDialog(
+                isDarkMode = isDark,
+                onRunCode = { viewModel.setCodeRunnerOpen(true) },
+                onFormatCode = {
+                    viewModel.formatCurrentCode()
+                    Toast.makeText(context, "Code formatted ✓", Toast.LENGTH_SHORT).show()
+                },
+                onToggleComment = { viewModel.toggleLineComment() },
+                onDuplicateLine = { viewModel.duplicateLine() },
+                onDeleteLine = { viewModel.deleteLine() },
+                onMoveLineUp = { viewModel.moveLineUp() },
+                onMoveLineDown = { viewModel.moveLineDown() },
+                onOpenGoToLine = { viewModel.setGoToLineOpen(true) },
+                onOpenSnippets = { viewModel.setSnippetsOpen(true) },
+                onOpenBugs = { viewModel.setCodeTrailsOpen(true, initialTab = 0) },
+                onOpenOutline = { viewModel.setCodeTrailsOpen(true, initialTab = 1) },
+                onOpenTrailHistory = { viewModel.setCodeTrailsOpen(true, initialTab = 2) },
+                onSortLinesAsc = { viewModel.sortLines(true) },
+                onSortLinesDesc = { viewModel.sortLines(false) },
+                onTrimWhitespace = {
+                    viewModel.trimTrailingWhitespace()
+                    Toast.makeText(context, "Trimmed trailing whitespace ✓", Toast.LENGTH_SHORT).show()
+                },
+                onToggleZenMode = { viewModel.toggleZenMode() },
+                onToggleWordWrap = {
+                    viewModel.updateSettings(settings.copy(wordWrap = !settings.wordWrap))
+                },
+                onSelectTheme = { viewModel.setEditorTheme(it) },
+                onSelectLanguage = { viewModel.changeLanguage(it) },
+                onDismiss = { viewModel.setCommandPaletteOpen(false) }
+            )
+        }
+
+        if (isCodeTrailsOpen) {
+            CodeTrailsSheet(
+                initialTab = codeTrailsInitialTab,
+                fileName = activeTab.fileName,
+                diagnostics = diagnostics,
+                symbols = symbols,
+                cursorTrail = cursorTrail,
+                canGoBack = trailIndex > 0,
+                canGoForward = trailIndex in 0 until cursorTrail.lastIndex,
+                onNavigateBack = { viewModel.navigateTrailBack() },
+                onNavigateForward = { viewModel.navigateTrailForward() },
+                onJumpToLine = { line, col -> viewModel.goToLine(line, col) },
+                onFormatCode = {
+                    viewModel.formatCurrentCode()
+                    Toast.makeText(context, "Auto-formatted ✓", Toast.LENGTH_SHORT).show()
+                },
+                isDarkMode = isDark,
+                onDismiss = { viewModel.setCodeTrailsOpen(false) }
+            )
+        }
+
+        if (isSnippetsOpen) {
+            SnippetsDialog(
+                language = activeTab.language,
+                isDarkMode = isDark,
+                onInsertSnippet = { viewModel.insertTextAtCursor(it) },
+                onDismiss = { viewModel.setSnippetsOpen(false) }
+            )
+        }
+
+        if (isGoToLineOpen) {
+            val totalLines = activeTab.state.text.count { it == '\n' } + 1
+            GoToLineDialog(
+                currentLine = cursorLine,
+                totalLines = totalLines,
+                onConfirm = { line, col -> viewModel.goToLine(line, col) },
+                onDismiss = { viewModel.setGoToLineOpen(false) }
+            )
+        }
 
         if (isFileExplorerOpen) {
             val startDir = Environment.getExternalStorageDirectory() ?: File("/sdcard")
@@ -247,7 +429,7 @@ fun CPhoneApp(
                 onFileSelected = { file ->
                     try {
                         val content = file.readText(Charsets.UTF_8)
-                        viewModel.openNewTab(file.name, content, android.net.Uri.fromFile(file))
+                        viewModel.openNewTab(file.name, content, Uri.fromFile(file))
                         Toast.makeText(context, "Opened: ${file.name}", Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         Toast.makeText(context, "Cannot open: ${e.message}", Toast.LENGTH_LONG).show()
@@ -276,7 +458,7 @@ fun CPhoneApp(
             val t = activeTab.state.text
             InfoDialog(
                 fileName = activeTab.fileName,
-                filePath = activeTab.uri?.path ?: "(unsaved)",
+                filePath = activeTab.uri?.path ?: "(unsaved / in-session)",
                 language = activeTab.language,
                 lineCount = if (t.isEmpty()) 1 else t.count { it == '\n' } + 1,
                 charCount = t.length,
@@ -296,8 +478,8 @@ fun CPhoneApp(
 
         if (isNewFileDialogOpen) {
             NewFileDialog(
-                onConfirm = { name ->
-                    viewModel.openNewTab(name, "")
+                onConfirm = { name, useStarter ->
+                    viewModel.openNewTab(name, "", useStarterIfBlank = useStarter)
                     viewModel.setNewFileDialogOpen(false)
                 },
                 onDismiss = { viewModel.setNewFileDialogOpen(false) }
@@ -313,7 +495,9 @@ fun CPhoneApp(
                 fileName = activeTab.fileName,
                 code = activeTab.state.text,
                 language = activeTab.language,
+                openTabs = tabs,
                 isDarkMode = isDark,
+                onJumpToLine = { errLine -> viewModel.goToLine(errLine, 1) },
                 onDismiss = { viewModel.setCodeRunnerOpen(false) }
             )
         }
@@ -329,7 +513,6 @@ fun CPhoneApp(
             )
         }
 
-        // Confirm close unsaved tab
         tabToCloseId?.let { id ->
             val tab = tabs.firstOrNull { it.id == id }
             AlertDialog(

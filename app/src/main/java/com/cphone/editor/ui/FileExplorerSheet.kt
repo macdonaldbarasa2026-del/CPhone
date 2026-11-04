@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cphone.editor.model.SupportedLanguage
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -132,12 +133,19 @@ fun FileExplorerSheet(
                             .padding(vertical = 10.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = if (file.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile,
-                            contentDescription = null,
-                            tint = if (file.isDirectory) Color(0xFFFFB300) else Color(0xFF007AFF),
-                            modifier = Modifier.size(24.dp)
-                        )
+                        if (file.isDirectory) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = Color(0xFFFFB300),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        } else {
+                            LanguageFileIcon(
+                                fileName = file.name,
+                                size = 24.dp
+                            )
+                        }
 
                         Spacer(modifier = Modifier.width(12.dp))
 
@@ -190,17 +198,23 @@ fun FileExplorerSheet(
                     value = newFileName,
                     onValueChange = { newFileName = it },
                     label = { Text("File Name") },
+                    leadingIcon = {
+                        LanguageFileIcon(fileName = newFileName, size = 22.dp)
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val file = File(currentDir, newFileName.trim())
-                    try {
-                        file.createNewFile()
-                        filesList = currentDir.listFiles()?.toList() ?: emptyList()
-                    } catch (_: Exception) {}
+                    val cleaned = SupportedLanguage.sanitizeFileName(newFileName)
+                    if (cleaned.isNotEmpty()) {
+                        val file = File(currentDir, cleaned)
+                        try {
+                            file.createNewFile()
+                            filesList = currentDir.listFiles()?.toList() ?: emptyList()
+                        } catch (_: Exception) {}
+                    }
                     showNewFileDialog = false
                 }) {
                     Text("Create")
@@ -279,6 +293,11 @@ fun FileExplorerSheet(
                     value = renameName,
                     onValueChange = { renameName = it },
                     label = { Text("New Name") },
+                    leadingIcon = {
+                        if (!file.isDirectory) {
+                            LanguageFileIcon(fileName = renameName, size = 22.dp)
+                        }
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -286,9 +305,12 @@ fun FileExplorerSheet(
             confirmButton = {
                 TextButton(onClick = {
                     try {
-                        val target = File(file.parentFile, renameName.trim())
-                        file.renameTo(target)
-                        filesList = currentDir.listFiles()?.toList() ?: emptyList()
+                        val cleaned = if (file.isDirectory) renameName.trim() else SupportedLanguage.sanitizeFileName(renameName)
+                        if (cleaned.isNotEmpty()) {
+                            val target = File(file.parentFile, cleaned)
+                            file.renameTo(target)
+                            filesList = currentDir.listFiles()?.toList() ?: emptyList()
+                        }
                     } catch (_: Exception) {}
                     fileToRename = null
                 }) {

@@ -53,7 +53,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: "CPhone Latest APK"
-          body: "Latest CPhone APK build with in-app compiler for HTML, Python, JS, Markdown, conditional Play button, and keyboard typing fix."
+          name: "CPhone Studio v2.0 Latest APK"
+          body: "CPhone Commercial Mobile IDE v2.0: Code Trails (Symbol Outline, Breadcrumbs, Cursor History), Live Bug & Syntax Inspector with Gutter Radar, Fixed Python 3 (Skulpt + Stdin + Turtle), TypeScript/JS V8 Runner, Multi-Tab HTML/CSS/JS Bundler, Command Palette, Auto-Formatter, 6 IDE Themes, and Calibrated Compact Android Dock."
           files: app/build/outputs/apk/debug/*.apk
           prerelease: false

@@ -10,6 +10,10 @@ import com.cphone.editor.model.EditorSettings
 import com.cphone.editor.model.EditorTab
 import com.cphone.editor.model.RecentFile
 import com.cphone.editor.model.SupportedLanguage
+import com.cphone.editor.tools.CodeAnalyzer
+import com.cphone.editor.tools.CodeDiagnostic
+import com.cphone.editor.tools.CodeSymbol
+import com.cphone.editor.tools.CursorTrailEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,6 +21,7 @@ import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import kotlin.math.abs
 
 class EditorViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -28,30 +33,48 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun loadSettings(): EditorSettings {
         return EditorSettings(
-            isDarkMode        = prefs.getBoolean("dark_mode", true),
-            fontSizeSp        = prefs.getFloat("font_size", 14f),
-            tabSize           = prefs.getInt("tab_size", 4),
-            showLineNumbers   = prefs.getBoolean("show_line_numbers", true),
-            wordWrap          = prefs.getBoolean("word_wrap", false),
-            alternatingRowBands = prefs.getBoolean("row_bands", true),
-            showTabBar        = prefs.getBoolean("show_tab_bar", true),
-            bracketAutoClose  = prefs.getBoolean("bracket_auto_close", true),
-            aiProvider        = prefs.getString("ai_provider", "gemini") ?: "gemini",
-            aiApiKey          = prefs.getString("ai_api_key", "") ?: "",
-            aiModel           = prefs.getString("ai_model", "") ?: "",
-            aiCustomEndpoint  = prefs.getString("ai_endpoint", "") ?: ""
+            isDarkMode            = prefs.getBoolean("dark_mode", true),
+            editorTheme           = prefs.getString("editor_theme", "one_dark") ?: "one_dark",
+            fontSizeSp            = prefs.getFloat("font_size", 13.5f),
+            lineSpacingMultiplier = prefs.getFloat("line_spacing", 1.48f),
+            tabSize               = prefs.getInt("tab_size", 4),
+            showLineNumbers       = prefs.getBoolean("show_line_numbers", true),
+            wordWrap              = prefs.getBoolean("word_wrap", false),
+            alternatingRowBands   = prefs.getBoolean("row_bands", false),
+            showTabBar            = prefs.getBoolean("show_tab_bar", true),
+            showCodeTrailBar      = prefs.getBoolean("show_code_trail", true),
+            showActiveLineHighlight = prefs.getBoolean("active_line_highlight", true),
+            showIndentGuides      = prefs.getBoolean("indent_guides", true),
+            showMinimapIndicator  = prefs.getBoolean("minimap_indicator", true),
+            compactBottomDock     = prefs.getBoolean("compact_bottom_dock", true),
+            pinchToZoom           = prefs.getBoolean("pinch_to_zoom", true),
+            autoSaveSession       = prefs.getBoolean("auto_save_session", true),
+            bracketAutoClose      = prefs.getBoolean("bracket_auto_close", true),
+            aiProvider            = prefs.getString("ai_provider", "gemini") ?: "gemini",
+            aiApiKey              = prefs.getString("ai_api_key", "") ?: "",
+            aiModel               = prefs.getString("ai_model", "") ?: "",
+            aiCustomEndpoint      = prefs.getString("ai_endpoint", "") ?: ""
         )
     }
 
     private fun saveSettings(s: EditorSettings) {
         prefs.edit()
             .putBoolean("dark_mode", s.isDarkMode)
+            .putString("editor_theme", s.editorTheme)
             .putFloat("font_size", s.fontSizeSp)
+            .putFloat("line_spacing", s.lineSpacingMultiplier)
             .putInt("tab_size", s.tabSize)
             .putBoolean("show_line_numbers", s.showLineNumbers)
             .putBoolean("word_wrap", s.wordWrap)
             .putBoolean("row_bands", s.alternatingRowBands)
             .putBoolean("show_tab_bar", s.showTabBar)
+            .putBoolean("show_code_trail", s.showCodeTrailBar)
+            .putBoolean("active_line_highlight", s.showActiveLineHighlight)
+            .putBoolean("indent_guides", s.showIndentGuides)
+            .putBoolean("minimap_indicator", s.showMinimapIndicator)
+            .putBoolean("compact_bottom_dock", s.compactBottomDock)
+            .putBoolean("pinch_to_zoom", s.pinchToZoom)
+            .putBoolean("auto_save_session", s.autoSaveSession)
             .putBoolean("bracket_auto_close", s.bracketAutoClose)
             .putString("ai_provider", s.aiProvider)
             .putString("ai_api_key", s.aiApiKey)
@@ -66,7 +89,27 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleTheme() {
-        updateSettings(_settings.value.copy(isDarkMode = !_settings.value.isDarkMode))
+        val nextDark = !_settings.value.isDarkMode
+        val nextTheme = if (!nextDark) "github_light" else if (_settings.value.editorTheme == "github_light") "one_dark" else _settings.value.editorTheme
+        updateSettings(_settings.value.copy(isDarkMode = nextDark, editorTheme = nextTheme))
+    }
+
+    fun setEditorTheme(themeId: String) {
+        val isDark = themeId != "github_light"
+        updateSettings(_settings.value.copy(editorTheme = themeId, isDarkMode = isDark))
+    }
+
+    fun adjustFontSize(delta: Float) {
+        val nextSize = (_settings.value.fontSizeSp + delta).coerceIn(9f, 26f)
+        updateSettings(_settings.value.copy(fontSizeSp = nextSize))
+    }
+
+    // ── Zen / Fullscreen Code View Mode ──────────────────────────────────────
+    private val _isZenMode = MutableStateFlow(false)
+    val isZenMode: StateFlow<Boolean> = _isZenMode.asStateFlow()
+
+    fun toggleZenMode() {
+        _isZenMode.value = !_isZenMode.value
     }
 
     // ── Recent files (persisted) ─────────────────────────────────────────────
@@ -90,7 +133,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun saveRecentFiles(list: List<RecentFile>) {
         val arr = JSONArray()
-        list.take(20).forEach { f ->
+        list.take(25).forEach { f ->
             arr.put(JSONObject().apply {
                 put("name", f.name)
                 put("path", f.path)
@@ -102,29 +145,210 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun addToRecent(name: String, path: String, uri: Uri) {
         val updated = (_recentFiles.value.filter { it.path != path } +
-                RecentFile(name, path, uri)).takeLast(20).reversed()
+                RecentFile(name, path, uri)).takeLast(25).reversed()
         _recentFiles.value = updated
         saveRecentFiles(updated)
     }
 
-    // ── Tabs ─────────────────────────────────────────────────────────────────
+    // ── Tabs & Session Persistence ───────────────────────────────────────────
+    private val defaultWelcomeCode = """
+        # main.py — Welcome to CPhone Commercial IDE v2.0
+        # Tap ▶ Run in the top bar to execute Python, JS, TS, HTML, CSS, JSON, or Markdown!
+
+        class ProjectWorkspace:
+            def __init__(self, name: str):
+                self.name = name
+                self.modules = ["Code Trails", "Bug Inspector", "Live Runner", "Command Palette"]
+
+            def summary(self):
+                print(f"=== {self.name} ===")
+                for idx, mod in enumerate(self.modules, start=1):
+                    print(f"  {idx}. {mod} [ACTIVE]")
+
+        def calculate_fibonacci(limit: int):
+            seq = [0, 1]
+            while len(seq) < limit:
+                seq.append(seq[-1] + seq[-2])
+            return seq
+
+        if __name__ == "__main__":
+            ws = ProjectWorkspace("CPhone Mobile Studio")
+            ws.summary()
+            print("Fibonacci(10):", calculate_fibonacci(10))
+    """.trimIndent() + "\n"
+
     private val emptyTab = EditorTab(
         id       = UUID.randomUUID().toString(),
-        fileName = "untitled.txt",
+        fileName = "main.py",
         uri      = null,
-        state    = TextFieldValue("", TextRange(0)),
+        state    = TextFieldValue(defaultWelcomeCode, TextRange(0)),
         isModified = false,
-        language = SupportedLanguage.PLAINTEXT
+        language = SupportedLanguage.PYTHON
     )
 
-    private val _tabs = MutableStateFlow(listOf(emptyTab))
+    private val _tabs = MutableStateFlow(loadSessionTabs())
     val tabs: StateFlow<List<EditorTab>> = _tabs.asStateFlow()
 
-    private val _activeTabId = MutableStateFlow(emptyTab.id)
+    private val _activeTabId = MutableStateFlow(
+        prefs.getString("active_tab_id", null)?.takeIf { id -> _tabs.value.any { it.id == id } }
+            ?: _tabs.value.first().id
+    )
     val activeTabId: StateFlow<String> = _activeTabId.asStateFlow()
 
     val currentTab: EditorTab
         get() = _tabs.value.firstOrNull { it.id == _activeTabId.value } ?: _tabs.value.first()
+
+    private fun loadSessionTabs(): List<EditorTab> {
+        val raw = prefs.getString("session_tabs_v2", null) ?: return listOf(emptyTab)
+        return try {
+            val arr = JSONArray(raw)
+            if (arr.length() == 0) return listOf(emptyTab)
+            val list = mutableListOf<EditorTab>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val name = obj.optString("fileName", "untitled.txt")
+                val text = obj.optString("text", "")
+                val cursor = obj.optInt("cursor", 0).coerceIn(0, text.length)
+                val uriStr = obj.optString("uri", "")
+                val langName = obj.optString("language", "")
+                val lang = SupportedLanguage.entries.firstOrNull { it.name == langName }
+                    ?: SupportedLanguage.detect(name)
+                list.add(
+                    EditorTab(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        fileName = name,
+                        uri = if (uriStr.isNotEmpty()) Uri.parse(uriStr) else null,
+                        state = TextFieldValue(text, TextRange(cursor)),
+                        isModified = obj.optBoolean("isModified", false),
+                        language = lang
+                    )
+                )
+            }
+            list.ifEmpty { listOf(emptyTab) }
+        } catch (_: Exception) {
+            listOf(emptyTab)
+        }
+    }
+
+    private fun saveSessionTabs() {
+        if (!_settings.value.autoSaveSession) return
+        try {
+            val arr = JSONArray()
+            _tabs.value.take(15).forEach { tab ->
+                // Only persist tabs under 200KB to keep SharedPreferences fast
+                if (tab.state.text.length < 200_000) {
+                    arr.put(JSONObject().apply {
+                        put("id", tab.id)
+                        put("fileName", tab.fileName)
+                        put("text", tab.state.text)
+                        put("cursor", tab.state.selection.start)
+                        put("uri", tab.uri?.toString() ?: "")
+                        put("isModified", tab.isModified)
+                        put("language", tab.language.name)
+                    })
+                }
+            }
+            prefs.edit()
+                .putString("session_tabs_v2", arr.toString())
+                .putString("active_tab_id", _activeTabId.value)
+                .apply()
+        } catch (_: Exception) {}
+    }
+
+    // ── Code Trails, Live Diagnostics & Symbol Outline ───────────────────────
+    private val _diagnostics = MutableStateFlow<List<CodeDiagnostic>>(emptyList())
+    val diagnostics: StateFlow<List<CodeDiagnostic>> = _diagnostics.asStateFlow()
+
+    private val _symbols = MutableStateFlow<List<CodeSymbol>>(emptyList())
+    val symbols: StateFlow<List<CodeSymbol>> = _symbols.asStateFlow()
+
+    private val _activeSymbol = MutableStateFlow<CodeSymbol?>(null)
+    val activeSymbol: StateFlow<CodeSymbol?> = _activeSymbol.asStateFlow()
+
+    private val _cursorLine = MutableStateFlow(1)
+    val cursorLine: StateFlow<Int> = _cursorLine.asStateFlow()
+
+    private val _cursorColumn = MutableStateFlow(1)
+    val cursorColumn: StateFlow<Int> = _cursorColumn.asStateFlow()
+
+    private val _cursorTrail = MutableStateFlow<List<CursorTrailEntry>>(emptyList())
+    val cursorTrail: StateFlow<List<CursorTrailEntry>> = _cursorTrail.asStateFlow()
+
+    private val _trailIndex = MutableStateFlow(-1)
+    val trailIndex: StateFlow<Int> = _trailIndex.asStateFlow()
+
+    private var isNavigatingTrail = false
+
+    init {
+        refreshAnalysisForCurrentTab()
+    }
+
+    private fun refreshAnalysisForCurrentTab(recordTrailIfJump: Boolean = true) {
+        val tab = currentTab
+        val text = tab.state.text
+        val pos = tab.state.selection.start.coerceIn(0, text.length)
+        val beforeCursor = text.substring(0, pos)
+        val line = beforeCursor.count { it == '\n' } + 1
+        val lastNl = beforeCursor.lastIndexOf('\n')
+        val col = if (lastNl == -1) pos + 1 else pos - lastNl
+
+        val prevLine = _cursorLine.value
+        _cursorLine.value = line
+        _cursorColumn.value = col
+
+        val syms = CodeAnalyzer.extractSymbols(text, tab.language)
+        _symbols.value = syms
+        val activeSym = CodeAnalyzer.findActiveSymbol(syms, line)
+        _activeSymbol.value = activeSym
+
+        _diagnostics.value = CodeAnalyzer.analyzeDiagnostics(text, tab.language)
+
+        if (recordTrailIfJump && !isNavigatingTrail) {
+            val currentList = _cursorTrail.value
+            val lastEntry = currentList.lastOrNull()
+            if (lastEntry == null || lastEntry.tabId != tab.id || abs(lastEntry.line - line) >= 4) {
+                val entry = CursorTrailEntry(
+                    tabId = tab.id,
+                    fileName = tab.fileName,
+                    line = line,
+                    column = col,
+                    symbolName = activeSym?.name ?: "Ln $line"
+                )
+                val trimmed = (currentList.take((_trailIndex.value + 1).coerceAtLeast(0)) + entry).takeLast(40)
+                _cursorTrail.value = trimmed
+                _trailIndex.value = trimmed.lastIndex
+            }
+        }
+    }
+
+    fun navigateTrailBack() {
+        val idx = _trailIndex.value
+        val trail = _cursorTrail.value
+        if (idx > 0 && trail.isNotEmpty()) {
+            val targetIdx = idx - 1
+            _trailIndex.value = targetIdx
+            jumpToTrailEntry(trail[targetIdx])
+        }
+    }
+
+    fun navigateTrailForward() {
+        val idx = _trailIndex.value
+        val trail = _cursorTrail.value
+        if (idx in 0 until trail.lastIndex) {
+            val targetIdx = idx + 1
+            _trailIndex.value = targetIdx
+            jumpToTrailEntry(trail[targetIdx])
+        }
+    }
+
+    private fun jumpToTrailEntry(entry: CursorTrailEntry) {
+        isNavigatingTrail = true
+        if (_tabs.value.any { it.id == entry.tabId }) {
+            _activeTabId.value = entry.tabId
+            goToLine(entry.line, entry.column)
+        }
+        isNavigatingTrail = false
+    }
 
     // ── Undo / Redo ──────────────────────────────────────────────────────────
     private val undoStacks = mutableMapOf<String, ArrayDeque<TextFieldValue>>()
@@ -148,6 +372,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             updateCurrentTab { it.copy(state = new) }
         }
+        refreshAnalysisForCurrentTab()
+        saveSessionTabs()
     }
 
     fun undo() {
@@ -156,6 +382,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         if (u.isNotEmpty()) {
             redoStack(tab.id).addLast(tab.state)
             updateCurrentTab { it.copy(state = u.removeLast(), isModified = true) }
+            refreshAnalysisForCurrentTab()
+            saveSessionTabs()
         }
     }
 
@@ -165,12 +393,48 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         if (r.isNotEmpty()) {
             undoStack(tab.id).addLast(tab.state)
             updateCurrentTab { it.copy(state = r.removeLast(), isModified = true) }
+            refreshAnalysisForCurrentTab()
+            saveSessionTabs()
         }
     }
 
     fun selectAll() {
-        val tab = currentTab
         updateCurrentTab { it.copy(state = it.state.copy(selection = TextRange(0, it.state.text.length))) }
+    }
+
+    // ── Cursor & Line Manipulation (Acode Power Features) ────────────────────
+    fun goToLine(targetLine: Int, targetCol: Int = 1) {
+        val tab = currentTab
+        val text = tab.state.text
+        val lines = text.split('\n')
+        val clampedLine = targetLine.coerceIn(1, lines.size.coerceAtLeast(1))
+        var offset = 0
+        for (i in 0 until clampedLine - 1) {
+            offset += lines[i].length + 1
+        }
+        val lineLen = lines.getOrNull(clampedLine - 1)?.length ?: 0
+        val colOffset = (targetCol - 1).coerceIn(0, lineLen)
+        val finalPos = (offset + colOffset).coerceIn(0, text.length)
+        onTextChanged(tab.state.copy(selection = TextRange(finalPos)))
+    }
+
+    fun moveCursorToLineStart() {
+        val tab = currentTab
+        val text = tab.state.text
+        val pos = tab.state.selection.start.coerceIn(0, text.length)
+        val lineStart = text.lastIndexOf('\n', (pos - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+        val firstNonSpace = (lineStart until text.length)
+            .firstOrNull { text[it] != ' ' && text[it] != '\t' || text[it] == '\n' } ?: lineStart
+        val target = if (pos == firstNonSpace) lineStart else firstNonSpace
+        onTextChanged(tab.state.copy(selection = TextRange(target)))
+    }
+
+    fun moveCursorToLineEnd() {
+        val tab = currentTab
+        val text = tab.state.text
+        val pos = tab.state.selection.start.coerceIn(0, text.length)
+        val lineEnd = text.indexOf('\n', pos).let { if (it < 0) text.length else it }
+        onTextChanged(tab.state.copy(selection = TextRange(lineEnd)))
     }
 
     fun moveCursorUp() {
@@ -203,60 +467,210 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun toggleLineComment() {
+        val tab = currentTab
+        val text = tab.state.text
+        val pos = tab.state.selection.start.coerceIn(0, text.length)
+        val lineStart = text.lastIndexOf('\n', (pos - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+        val lineEnd = text.indexOf('\n', pos).let { if (it < 0) text.length else it }
+        val currentLineText = text.substring(lineStart, lineEnd)
+        val prefix = tab.language.commentPrefix
+
+        val updatedLine = when {
+            prefix == "<!--" -> {
+                val trimmed = currentLineText.trim()
+                if (trimmed.startsWith("<!--") && trimmed.endsWith("-->")) {
+                    currentLineText.replaceFirst("<!--", "").replaceLast("-->", "").trimEnd()
+                } else {
+                    "<!-- $currentLineText -->"
+                }
+            }
+            prefix == "/*" -> {
+                val trimmed = currentLineText.trim()
+                if (trimmed.startsWith("/*") && trimmed.endsWith("*/")) {
+                    currentLineText.replaceFirst("/*", "").replaceLast("*/", "").trimEnd()
+                } else {
+                    "/* $currentLineText */"
+                }
+            }
+            else -> {
+                val leadingSpaces = currentLineText.takeWhile { it == ' ' || it == '\t' }
+                val content = currentLineText.substring(leadingSpaces.length)
+                if (content.startsWith("$prefix ")) {
+                    leadingSpaces + content.removePrefix("$prefix ")
+                } else if (content.startsWith(prefix)) {
+                    leadingSpaces + content.removePrefix(prefix)
+                } else {
+                    "$leadingSpaces$prefix $content"
+                }
+            }
+        }
+
+        val newText = text.substring(0, lineStart) + updatedLine + text.substring(lineEnd)
+        val newCursor = (lineStart + updatedLine.length).coerceIn(0, newText.length)
+        onTextChanged(TextFieldValue(newText, TextRange(newCursor)))
+    }
+
+    private fun String.replaceLast(oldValue: String, newValue: String): String {
+        val lastIndex = lastIndexOf(oldValue)
+        if (lastIndex == -1) return this
+        return substring(0, lastIndex) + newValue + substring(lastIndex + oldValue.length)
+    }
+
+    fun duplicateLine() {
+        val tab = currentTab
+        val text = tab.state.text
+        val pos = tab.state.selection.start.coerceIn(0, text.length)
+        val lineStart = text.lastIndexOf('\n', (pos - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+        val lineEnd = text.indexOf('\n', pos).let { if (it < 0) text.length else it }
+        val lineContent = text.substring(lineStart, lineEnd)
+        val newText = text.substring(0, lineEnd) + "\n" + lineContent + text.substring(lineEnd)
+        val newCursor = (pos + lineContent.length + 1).coerceIn(0, newText.length)
+        onTextChanged(TextFieldValue(newText, TextRange(newCursor)))
+    }
+
+    fun deleteLine() {
+        val tab = currentTab
+        val text = tab.state.text
+        if (text.isEmpty()) return
+        val pos = tab.state.selection.start.coerceIn(0, text.length)
+        val lineStart = text.lastIndexOf('\n', (pos - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+        val lineEnd = text.indexOf('\n', pos).let { if (it < 0) text.length else it + 1 }
+        val actualStart = if (lineEnd == text.length && lineStart > 0) lineStart - 1 else lineStart
+        val newText = text.removeRange(actualStart, lineEnd)
+        onTextChanged(TextFieldValue(newText, TextRange(actualStart.coerceIn(0, newText.length))))
+    }
+
+    fun moveLineUp() {
+        val tab = currentTab
+        val lines = tab.state.text.split('\n').toMutableList()
+        val lineIdx = (_cursorLine.value - 1).coerceIn(0, lines.lastIndex)
+        if (lineIdx <= 0) return
+        val temp = lines[lineIdx - 1]
+        lines[lineIdx - 1] = lines[lineIdx]
+        lines[lineIdx] = temp
+        val newText = lines.joinToString("\n")
+        onTextChanged(TextFieldValue(newText, tab.state.selection))
+        goToLine(lineIdx, _cursorColumn.value)
+    }
+
+    fun moveLineDown() {
+        val tab = currentTab
+        val lines = tab.state.text.split('\n').toMutableList()
+        val lineIdx = (_cursorLine.value - 1).coerceIn(0, lines.lastIndex)
+        if (lineIdx >= lines.lastIndex) return
+        val temp = lines[lineIdx + 1]
+        lines[lineIdx + 1] = lines[lineIdx]
+        lines[lineIdx] = temp
+        val newText = lines.joinToString("\n")
+        onTextChanged(TextFieldValue(newText, tab.state.selection))
+        goToLine(lineIdx + 2, _cursorColumn.value)
+    }
+
+    fun formatCurrentCode() {
+        val tab = currentTab
+        val formatted = CodeAnalyzer.formatCode(tab.state.text, tab.language, _settings.value.tabSize)
+        if (formatted != tab.state.text) {
+            onTextChanged(TextFieldValue(formatted, TextRange(tab.state.selection.start.coerceIn(0, formatted.length))))
+        }
+    }
+
+    fun sortLines(ascending: Boolean = true) {
+        val tab = currentTab
+        val sorted = tab.state.text.split('\n').let {
+            if (ascending) it.sorted() else it.sortedDescending()
+        }.joinToString("\n")
+        onTextChanged(TextFieldValue(sorted, TextRange(0)))
+    }
+
+    fun trimTrailingWhitespace() {
+        val tab = currentTab
+        val cleaned = tab.state.text.split('\n').joinToString("\n") { it.trimEnd() }
+        onTextChanged(TextFieldValue(cleaned, TextRange(tab.state.selection.start.coerceIn(0, cleaned.length))))
+    }
+
+    fun changeLanguage(language: SupportedLanguage) {
+        updateCurrentTab { it.copy(language = language) }
+        refreshAnalysisForCurrentTab(recordTrailIfJump = false)
+        saveSessionTabs()
+    }
+
     fun renameCurrentTab(newName: String) {
-        val trimmed = newName.trim()
-        if (trimmed.isEmpty()) return
-        val newLang = SupportedLanguage.detect(trimmed)
-        updateCurrentTab { it.copy(fileName = trimmed, language = newLang, isModified = true) }
+        val cleaned = SupportedLanguage.sanitizeFileName(newName)
+        if (cleaned.isEmpty()) return
+        val newLang = SupportedLanguage.detect(cleaned)
+        updateCurrentTab { it.copy(fileName = cleaned, language = newLang, isModified = true) }
+        refreshAnalysisForCurrentTab(recordTrailIfJump = false)
+        saveSessionTabs()
     }
 
     // ── Tab management ───────────────────────────────────────────────────────
-    fun openNewTab(name: String, content: String, uri: Uri? = null) {
-        // If the only tab is the blank untitled, replace it
+    fun openNewTab(name: String, content: String, uri: Uri? = null, useStarterIfBlank: Boolean = false) {
+        val cleanedName = SupportedLanguage.sanitizeFileName(name).ifEmpty { "untitled.py" }
+        val finalContent = if (content.isEmpty() && useStarterIfBlank) {
+            SupportedLanguage.starterTemplate(cleanedName)
+        } else {
+            content
+        }
         val current = _tabs.value
         if (current.size == 1 && current[0].fileName == "untitled.txt" &&
             current[0].state.text.isEmpty() && !current[0].isModified) {
             val tab = EditorTab(
                 id       = current[0].id,
-                fileName = name,
+                fileName = cleanedName,
                 uri      = uri,
-                state    = TextFieldValue(content, TextRange(0)),
+                state    = TextFieldValue(finalContent, TextRange(0)),
                 isModified = false,
-                language = SupportedLanguage.detect(name)
+                language = SupportedLanguage.detect(cleanedName)
             )
             _tabs.value = listOf(tab)
             _activeTabId.value = tab.id
         } else {
-            // Check if already open
             val existing = current.firstOrNull { it.uri != null && it.uri == uri }
             if (existing != null) {
                 _activeTabId.value = existing.id
+                refreshAnalysisForCurrentTab()
                 return
             }
             val tab = EditorTab(
                 id       = UUID.randomUUID().toString(),
-                fileName = name,
+                fileName = cleanedName,
                 uri      = uri,
-                state    = TextFieldValue(content, TextRange(0)),
+                state    = TextFieldValue(finalContent, TextRange(0)),
                 isModified = false,
-                language = SupportedLanguage.detect(name)
+                language = SupportedLanguage.detect(cleanedName)
             )
             _tabs.update { it + tab }
             _activeTabId.value = tab.id
         }
-        if (uri != null) addToRecent(name, uri.path ?: name, uri)
+        if (uri != null) addToRecent(cleanedName, uri.path ?: cleanedName, uri)
+        refreshAnalysisForCurrentTab()
+        saveSessionTabs()
     }
 
     fun openFile(name: String, content: String, uri: Uri? = null) = openNewTab(name, content, uri)
 
-    fun selectTab(id: String) { _activeTabId.value = id }
+    fun selectTab(id: String) {
+        _activeTabId.value = id
+        refreshAnalysisForCurrentTab()
+        saveSessionTabs()
+    }
 
     fun closeTab(id: String) {
         val list = _tabs.value
         if (list.size == 1) {
-            // Reset to blank instead of closing last tab
-            _tabs.value = listOf(emptyTab.copy(id = UUID.randomUUID().toString()))
-            _activeTabId.value = _tabs.value[0].id
+            val fresh = EditorTab(
+                id = UUID.randomUUID().toString(),
+                fileName = "untitled.py",
+                uri = null,
+                state = TextFieldValue("", TextRange(0)),
+                isModified = false,
+                language = SupportedLanguage.PYTHON
+            )
+            _tabs.value = listOf(fresh)
+            _activeTabId.value = fresh.id
+            refreshAnalysisForCurrentTab()
+            saveSessionTabs()
             return
         }
         val idx = list.indexOfFirst { it.id == id }
@@ -267,6 +681,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
         undoStacks.remove(id)
         redoStacks.remove(id)
+        refreshAnalysisForCurrentTab()
+        saveSessionTabs()
     }
 
     fun markSaved(uri: Uri? = null, name: String? = null) {
@@ -277,6 +693,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             tab.copy(isModified = false, uri = newUri, fileName = newName,
                 language = if (name != null) SupportedLanguage.detect(name) else tab.language)
         }
+        refreshAnalysisForCurrentTab(recordTrailIfJump = false)
+        saveSessionTabs()
     }
 
     fun insertTextAtCursor(text: String) {
@@ -308,12 +726,12 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _searchMatches   = MutableStateFlow<List<IntRange>>(emptyList())
     private val _currentMatchIdx = MutableStateFlow(0)
 
-    val isSearchOpen:    StateFlow<Boolean>       = _isSearchOpen.asStateFlow()
-    val isReplaceMode:   StateFlow<Boolean>       = _isReplaceMode.asStateFlow()
-    val searchQuery:     StateFlow<String>        = _searchQuery.asStateFlow()
-    val replaceQuery:    StateFlow<String>        = _replaceQuery.asStateFlow()
+    val isSearchOpen:      StateFlow<Boolean>        = _isSearchOpen.asStateFlow()
+    val isReplaceMode:     StateFlow<Boolean>        = _isReplaceMode.asStateFlow()
+    val searchQuery:       StateFlow<String>         = _searchQuery.asStateFlow()
+    val replaceQuery:      StateFlow<String>         = _replaceQuery.asStateFlow()
     val searchMatches:     StateFlow<List<IntRange>> = _searchMatches.asStateFlow()
-    val currentMatchIndex: StateFlow<Int>         = _currentMatchIdx.asStateFlow()
+    val currentMatchIndex: StateFlow<Int>            = _currentMatchIdx.asStateFlow()
 
     fun openSearch(replaceMode: Boolean = false) { _isReplaceMode.value = replaceMode; _isSearchOpen.value = true }
     fun closeSearch() { _isSearchOpen.value = false; _searchMatches.value = emptyList(); _currentMatchIdx.value = 0 }
@@ -347,6 +765,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private fun highlightMatch() {
         val r = _searchMatches.value.getOrNull(_currentMatchIdx.value) ?: return
         updateCurrentTab { it.copy(state = it.state.copy(selection = TextRange(r.first, r.last + 1))) }
+        refreshAnalysisForCurrentTab()
     }
     fun replaceCurrent() {
         val matches = _searchMatches.value; val idx = _currentMatchIdx.value
@@ -363,16 +782,21 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         updateSearchMatches(q, newText)
     }
 
-    // ── Dialog toggles ───────────────────────────────────────────────────────
-    private val _isInfoOpen       = MutableStateFlow(false)
-    private val _isSettingsOpen   = MutableStateFlow(false)
-    private val _isNewFileOpen    = MutableStateFlow(false)
-    private val _isExplorerOpen   = MutableStateFlow(false)
-    private val _isAiOpen         = MutableStateFlow(false)
-    private val _isAboutOpen      = MutableStateFlow(false)
-    private val _isRecentOpen     = MutableStateFlow(false)
-    private val _isCodeRunnerOpen = MutableStateFlow(false)
-    private val _isRenameOpen     = MutableStateFlow(false)
+    // ── Dialog & Sheet Toggles ───────────────────────────────────────────────
+    private val _isInfoOpen           = MutableStateFlow(false)
+    private val _isSettingsOpen       = MutableStateFlow(false)
+    private val _isNewFileOpen        = MutableStateFlow(false)
+    private val _isExplorerOpen       = MutableStateFlow(false)
+    private val _isAiOpen             = MutableStateFlow(false)
+    private val _isAboutOpen          = MutableStateFlow(false)
+    private val _isRecentOpen         = MutableStateFlow(false)
+    private val _isCodeRunnerOpen     = MutableStateFlow(false)
+    private val _isRenameOpen         = MutableStateFlow(false)
+    private val _isCommandPaletteOpen = MutableStateFlow(false)
+    private val _isCodeTrailsOpen     = MutableStateFlow(false)
+    private val _codeTrailsInitialTab = MutableStateFlow(0) // 0 = Bugs/Problems, 1 = Symbols, 2 = Trail History
+    private val _isSnippetsOpen       = MutableStateFlow(false)
+    private val _isGoToLineOpen       = MutableStateFlow(false)
 
     val isInfoDialogOpen:     StateFlow<Boolean> = _isInfoOpen.asStateFlow()
     val isSettingsDialogOpen: StateFlow<Boolean> = _isSettingsOpen.asStateFlow()
@@ -383,6 +807,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     val isRecentFilesOpen:    StateFlow<Boolean> = _isRecentOpen.asStateFlow()
     val isCodeRunnerOpen:     StateFlow<Boolean> = _isCodeRunnerOpen.asStateFlow()
     val isRenameDialogOpen:   StateFlow<Boolean> = _isRenameOpen.asStateFlow()
+    val isCommandPaletteOpen: StateFlow<Boolean> = _isCommandPaletteOpen.asStateFlow()
+    val isCodeTrailsOpen:     StateFlow<Boolean> = _isCodeTrailsOpen.asStateFlow()
+    val codeTrailsInitialTab: StateFlow<Int>     = _codeTrailsInitialTab.asStateFlow()
+    val isSnippetsOpen:       StateFlow<Boolean> = _isSnippetsOpen.asStateFlow()
+    val isGoToLineOpen:       StateFlow<Boolean> = _isGoToLineOpen.asStateFlow()
 
     fun setInfoDialogOpen(v: Boolean)       { _isInfoOpen.value = v }
     fun setSettingsDialogOpen(v: Boolean)   { _isSettingsOpen.value = v }
@@ -393,4 +822,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun setRecentFilesOpen(v: Boolean)      { _isRecentOpen.value = v }
     fun setCodeRunnerOpen(v: Boolean)       { _isCodeRunnerOpen.value = v }
     fun setRenameDialogOpen(v: Boolean)     { _isRenameOpen.value = v }
+    fun setCommandPaletteOpen(v: Boolean)   { _isCommandPaletteOpen.value = v }
+    fun setCodeTrailsOpen(v: Boolean, initialTab: Int = 0) {
+        _codeTrailsInitialTab.value = initialTab
+        _isCodeTrailsOpen.value = v
+    }
+    fun setSnippetsOpen(v: Boolean)         { _isSnippetsOpen.value = v }
+    fun setGoToLineOpen(v: Boolean)         { _isGoToLineOpen.value = v }
 }

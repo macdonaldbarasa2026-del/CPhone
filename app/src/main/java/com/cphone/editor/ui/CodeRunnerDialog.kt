@@ -1,18 +1,18 @@
 package com.cphone.editor.ui
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
-import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,7 +27,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -35,7 +37,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.cphone.editor.model.EditorTab
 import com.cphone.editor.model.SupportedLanguage
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -47,30 +52,38 @@ data class ConsoleLogItem(
     val timestamp: String = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date())
 )
 
+/**
+ * Thread-safe WebView JavascriptInterface that always marshals callbacks onto Android's Main UI Thread.
+ * Fixes race conditions and state mutation crashes from WebView's background JavaBridge thread.
+ */
 class AndroidRunnerInterface(
+    private val mainHandler: Handler = Handler(Looper.getMainLooper()),
     private val onStdoutCallback: (String) -> Unit,
-    private val onErrorCallback: (String, String) -> Unit,
+    private val onErrorCallback: (String, String, Int) -> Unit,
     private val onFinishedCallback: (Int, String) -> Unit,
     private val onConsoleCallback: (String, String) -> Unit
 ) {
     @JavascriptInterface
     fun onStdout(text: String) {
-        onStdoutCallback(text)
+        mainHandler.post { onStdoutCallback(text) }
     }
 
     @JavascriptInterface
     fun onError(error: String, elapsed: String) {
-        onErrorCallback(error, elapsed)
+        val lineMatch = Regex("""line\s+(\d+)""", RegexOption.IGNORE_CASE).find(error)
+            ?: Regex(""":(\d+):\d+""").find(error)
+        val lineNum = lineMatch?.groupValues?.get(1)?.toIntOrNull() ?: -1
+        mainHandler.post { onErrorCallback(error, elapsed, lineNum) }
     }
 
     @JavascriptInterface
     fun onFinished(exitCode: Int, elapsed: String) {
-        onFinishedCallback(exitCode, elapsed)
+        mainHandler.post { onFinishedCallback(exitCode, elapsed) }
     }
 
     @JavascriptInterface
     fun onConsoleMessage(type: String, message: String) {
-        onConsoleCallback(type, message)
+        mainHandler.post { onConsoleCallback(type, message) }
     }
 }
 
@@ -80,11 +93,14 @@ fun CodeRunnerDialog(
     fileName: String,
     code: String,
     language: SupportedLanguage,
+    openTabs: List<EditorTab> = emptyList(),
     isDarkMode: Boolean,
+    onJumpToLine: (Int) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Preview/Output, 1: Console
+    val clipboard = LocalClipboardManager.current
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Output/Preview, 1: Console/Stdin
     var runKey by remember { mutableIntStateOf(0) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
@@ -92,22 +108,40 @@ fun CodeRunnerDialog(
     var terminalOutput by remember { mutableStateOf("") }
     var isRunning by remember { mutableStateOf(false) }
     var executionStatus by remember { mutableStateOf("Ready") }
+    var errorLineNumber by remember { mutableIntStateOf(-1) }
     val consoleLogs = remember { mutableStateListOf<ConsoleLogItem>() }
+
+    // Interactive Stdin (for Python input()) & REPL expression evaluation
+    var stdinText by remember { mutableStateOf("") }
+    var showStdinBox by remember { mutableStateOf(code.contains("input(")) }
+    var replCommand by remember { mutableStateOf("") }
+
+    // Interactive JS prompt dialog state (intercepts window.prompt / Python input() live!)
+    var activeJsPromptMessage by remember { mutableStateOf<String?>(null) }
+    var activeJsPromptDefault by remember { mutableStateOf("") }
+    var activeJsPromptResult by remember { mutableStateOf<JsPromptResult?>(null) }
 
     val terminalScrollState = rememberScrollState()
 
-    // Determine runner mode
-    val isHtml = language == SupportedLanguage.HTML || fileName.endsWith(".html", true) || fileName.endsWith(".htm", true)
+    val isHtml = language == SupportedLanguage.HTML || language == SupportedLanguage.XML ||
+        fileName.endsWith(".html", true) || fileName.endsWith(".htm", true) || fileName.endsWith(".svg", true)
     val isPython = language == SupportedLanguage.PYTHON || fileName.endsWith(".py", true) || fileName.endsWith(".pyw", true)
-    val isJs = language == SupportedLanguage.JAVASCRIPT || fileName.endsWith(".js", true) || fileName.endsWith(".mjs", true)
+    val isJsOrTs = language == SupportedLanguage.JAVASCRIPT || language == SupportedLanguage.TYPESCRIPT ||
+        fileName.endsWith(".js", true) || fileName.endsWith(".mjs", true) ||
+        fileName.endsWith(".ts", true) || fileName.endsWith(".tsx", true) || fileName.endsWith(".jsx", true)
+    val isCss = language == SupportedLanguage.CSS || fileName.endsWith(".css", true)
+    val isJson = language == SupportedLanguage.JSON || fileName.endsWith(".json", true)
     val isMarkdown = language == SupportedLanguage.MARKDOWN || fileName.endsWith(".md", true) || fileName.endsWith(".markdown", true)
+    val usesTurtle = isPython && (code.contains("import turtle") || code.contains("from turtle"))
 
     val runnerTitle = when {
-        isHtml -> "HTML Live Preview"
-        isPython -> "Python Runner"
-        isJs -> "JavaScript Runner"
-        isMarkdown -> "Markdown Preview"
-        else -> "Code Runner"
+        isHtml -> "HTML + Multi-Tab Preview"
+        isPython -> if (usesTurtle) "Python 3 + Turtle Canvas" else "Python 3 Engine (Skulpt)"
+        isJsOrTs -> if (language == SupportedLanguage.TYPESCRIPT || fileName.endsWith(".ts", true)) "TypeScript + V8 Runner" else "JavaScript V8 Runner"
+        isCss -> "CSS Live Sandbox"
+        isJson -> "JSON Validator & Inspector"
+        isMarkdown -> "Markdown Live Preview"
+        else -> "${language.displayName} Inspector"
     }
 
     fun openInExternalBrowser(htmlContent: String) {
@@ -125,8 +159,7 @@ fun CodeRunnerDialog(
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(Intent.createChooser(intent, "Open in Browser"))
-        } catch (e: Exception) {
-            // Fallback: share text
+        } catch (_: Exception) {
             val sendIntent = Intent().apply {
                 action = Intent.ACTION_SEND
                 putExtra(Intent.EXTRA_TEXT, htmlContent)
@@ -137,12 +170,14 @@ fun CodeRunnerDialog(
     }
 
     fun executeRunner() {
+        errorLineNumber = -1
         if (isPython) {
             terminalOutput = ">>> python3 $fileName\n"
             isRunning = true
             executionStatus = "Running..."
-        } else if (isJs) {
-            terminalOutput = ">>> node $fileName\n"
+        } else if (isJsOrTs) {
+            val cmd = if (language == SupportedLanguage.TYPESCRIPT || fileName.endsWith(".ts", true)) "ts-node" else "node"
+            terminalOutput = ">>> $cmd $fileName\n"
             isRunning = true
             executionStatus = "Running..."
         }
@@ -153,9 +188,9 @@ fun CodeRunnerDialog(
         executeRunner()
     }
 
-    val dialogBg = if (isDarkMode) Color(0xFF1E1E2E) else Color(0xFFF8F9FA)
-    val topBarBg = if (isDarkMode) Color(0xFF181824) else Color(0xFFFFFFFF)
-    val contentColor = if (isDarkMode) Color(0xFFE0E0E0) else Color(0xFF202124)
+    val dialogBg = if (isDarkMode) Color(0xFF1A1B26) else Color(0xFFF8F9FA)
+    val topBarBg = if (isDarkMode) Color(0xFF13141C) else Color(0xFFFFFFFF)
+    val contentColor = if (isDarkMode) Color(0xFFE5E9F0) else Color(0xFF202124)
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -172,13 +207,13 @@ fun CodeRunnerDialog(
                         Column {
                             Text(
                                 text = fileName,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
                                 color = contentColor
                             )
                             Text(
                                 text = runnerTitle,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 color = Color(0xFF4CAF50)
                             )
                         }
@@ -189,33 +224,67 @@ fun CodeRunnerDialog(
                         }
                     },
                     actions = {
+                        // Jump to Bug Line button if an error line was detected
+                        if (errorLineNumber > 0) {
+                            FilledTonalButton(
+                                onClick = {
+                                    onDismiss()
+                                    onJumpToLine(errorLineNumber)
+                                },
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = Color(0xFFE06C75).copy(alpha = 0.2f),
+                                    contentColor = Color(0xFFE06C75)
+                                ),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text("Line $errorLineNumber Bug", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+
+                        // Copy output button for terminal runners
+                        if (isPython || isJsOrTs || isJson) {
+                            IconButton(onClick = {
+                                clipboard.setText(AnnotatedString(terminalOutput.ifEmpty { code }))
+                            }) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Output", tint = contentColor)
+                            }
+                        }
+
+                        // Stdin toggle for Python
+                        if (isPython) {
+                            IconButton(onClick = { showStdinBox = !showStdinBox }) {
+                                Icon(
+                                    imageVector = Icons.Default.Input,
+                                    contentDescription = "Stdin Input",
+                                    tint = if (showStdinBox) Color(0xFF61AFEF) else contentColor
+                                )
+                            }
+                        }
+
                         // Re-run / Reload button
                         IconButton(onClick = {
-                            if (isHtml || isMarkdown) {
-                                consoleLogs.clear()
-                                webViewRef?.reload()
-                            } else {
-                                executeRunner()
-                            }
+                            consoleLogs.clear()
+                            executeRunner()
                         }) {
                             Icon(
-                                imageVector = if (isPython || isJs) Icons.Default.PlayArrow else Icons.Default.Refresh,
+                                imageVector = if (isPython || isJsOrTs) Icons.Default.PlayArrow else Icons.Default.Refresh,
                                 contentDescription = "Run / Refresh",
                                 tint = Color(0xFF4CAF50)
                             )
                         }
 
-                        // For HTML / Markdown: Open in Browser
                         if (isHtml || isMarkdown) {
                             IconButton(onClick = { openInExternalBrowser(code) }) {
                                 Icon(Icons.Default.OpenInBrowser, contentDescription = "Open in Browser", tint = contentColor)
                             }
                         }
 
-                        // For Python / JS: Clear button
-                        if (isPython || isJs) {
+                        if (isPython || isJsOrTs) {
                             IconButton(onClick = {
                                 terminalOutput = ""
+                                errorLineNumber = -1
                                 consoleLogs.clear()
                             }) {
                                 Icon(Icons.Default.DeleteOutline, contentDescription = "Clear Output", tint = contentColor)
@@ -230,22 +299,22 @@ fun CodeRunnerDialog(
                     TabRow(
                         selectedTabIndex = selectedTab,
                         containerColor = topBarBg,
-                        contentColor = Color(0xFF007AFF)
+                        contentColor = Color(0xFF61AFEF)
                     ) {
                         Tab(
                             selected = selectedTab == 0,
                             onClick = { selectedTab = 0 },
-                            text = { Text("Preview") }
+                            text = { Text("Live Preview", fontSize = 13.sp) }
                         )
                         Tab(
                             selected = selectedTab == 1,
                             onClick = { selectedTab = 1 },
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Console")
+                                    Text("DevTools Console", fontSize = 13.sp)
                                     if (consoleLogs.isNotEmpty()) {
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Badge(containerColor = Color(0xFF007AFF)) {
+                                        Badge(containerColor = Color(0xFF61AFEF)) {
                                             Text(consoleLogs.size.toString())
                                         }
                                     }
@@ -258,32 +327,75 @@ fun CodeRunnerDialog(
                 // ── Main Content Area ─────────────────────────────────────────
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     when {
-                        // ── HTML Preview & Console ────────────────────────────
+                        // ── 1. HTML + Multi-Tab Bundled Preview & Console ─────
                         isHtml -> {
+                            val bundledHtml = remember(code, openTabs, runKey) {
+                                bundleHtmlWithOpenTabs(code, openTabs)
+                            }
                             if (selectedTab == 0) {
                                 HtmlPreviewView(
-                                    htmlCode = code,
+                                    htmlCode = bundledHtml,
                                     runKey = runKey,
                                     onConsole = { type, msg ->
                                         consoleLogs.add(ConsoleLogItem(type, msg))
                                     },
+                                    onPromptRequest = { msg, def, res ->
+                                        activeJsPromptMessage = msg
+                                        activeJsPromptDefault = def
+                                        activeJsPromptResult = res
+                                    },
                                     onWebViewReady = { webViewRef = it }
                                 )
                             } else {
-                                ConsoleLogList(
-                                    logs = consoleLogs,
-                                    isDarkMode = isDarkMode,
-                                    onClear = { consoleLogs.clear() }
-                                )
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        ConsoleLogList(
+                                            logs = consoleLogs,
+                                            isDarkMode = isDarkMode
+                                        )
+                                    }
+                                    // Live JS Console Expression Evaluator
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(topBarBg)
+                                            .padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        OutlinedTextField(
+                                            value = replCommand,
+                                            onValueChange = { replCommand = it },
+                                            placeholder = { Text("Evaluate JS in page (e.g. document.title)...", fontSize = 12.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Button(
+                                            onClick = {
+                                                val expr = replCommand.trim()
+                                                if (expr.isNotEmpty()) {
+                                                    consoleLogs.add(ConsoleLogItem("info", "> $expr"))
+                                                    webViewRef?.evaluateJavascript(
+                                                        "(function(){ try { var r = eval(${JSONObject.quote(expr)}); console.log(r); } catch(e) { console.error(e.toString()); } })();",
+                                                        null
+                                                    )
+                                                    replCommand = ""
+                                                }
+                                            }
+                                        ) {
+                                            Text("Eval")
+                                        }
+                                    }
+                                }
                             }
                         }
 
-                        // ── Python Runner (Skulpt offline engine) ─────────────
+                        // ── 2. Python 3 Runner (Skulpt + Stdin + Turtle) ──────
                         isPython -> {
                             Column(modifier = Modifier.fillMaxSize()) {
                                 // Execution status header
                                 Surface(
-                                    color = if (isDarkMode) Color(0xFF181824) else Color(0xFFEAEAEA),
+                                    color = if (isDarkMode) Color(0xFF16161E) else Color(0xFFEAEAEA),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -291,7 +403,7 @@ fun CodeRunnerDialog(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "Python 3 Engine (Skulpt local)",
+                                            text = "Python 3.10 Compatible Runtime",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium,
                                             color = contentColor
@@ -308,12 +420,37 @@ fun CodeRunnerDialog(
                                         Text(
                                             text = executionStatus,
                                             fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
                                             color = when {
                                                 isRunning -> Color(0xFFFFA000)
-                                                executionStatus.contains("Error", true) -> Color(0xFFE53935)
+                                                executionStatus.contains("Error", true) -> Color(0xFFE06C75)
                                                 else -> Color(0xFF4CAF50)
                                             }
                                         )
+                                    }
+                                }
+
+                                // Optional Pre-Supplied Stdin Box for input() calls
+                                if (showStdinBox) {
+                                    Surface(
+                                        color = if (isDarkMode) Color(0xFF1F2335) else Color(0xFFEEF2F6),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                            Text(
+                                                text = "Stdin Input Queue (one line per input() call, or leave blank for interactive popup):",
+                                                fontSize = 11.sp,
+                                                color = contentColor.copy(alpha = 0.8f)
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            OutlinedTextField(
+                                                value = stdinText,
+                                                onValueChange = { stdinText = it },
+                                                placeholder = { Text("Line 1 input\nLine 2 input...", fontSize = 12.sp) },
+                                                maxLines = 3,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
                                     }
                                 }
 
@@ -322,45 +459,53 @@ fun CodeRunnerDialog(
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
-                                        .background(Color(0xFF14141E))
+                                        .background(Color(0xFF11121A))
                                         .verticalScroll(terminalScrollState)
                                         .padding(12.dp)
                                 ) {
                                     Text(
-                                        text = terminalOutput.ifEmpty { "Waiting for output..." },
-                                        color = Color(0xFFE0E0E0),
+                                        text = terminalOutput.ifEmpty { "Waiting for Python output..." },
+                                        color = Color(0xFFE5E9F0),
                                         fontFamily = FontFamily.Monospace,
                                         fontSize = 13.sp,
-                                        lineHeight = 18.sp
+                                        lineHeight = 19.sp
                                     )
                                 }
 
-                                // Headless WebView that executes Python via Skulpt
-                                HeadlessPythonRunner(
+                                // Python Runner WebView (visible if Turtle graphics is used, 1px otherwise)
+                                PythonWebViewRunner(
                                     code = code,
+                                    stdinLines = stdinText,
+                                    showTurtleCanvas = usesTurtle,
                                     runKey = runKey,
                                     onStdout = { text ->
                                         terminalOutput += text
                                     },
-                                    onError = { err, elapsed ->
-                                        terminalOutput += "\nTraceback / Error:\n$err\n[Process exited with error in ${elapsed}s]\n"
+                                    onError = { err, elapsed, lineNum ->
+                                        terminalOutput += "\nTraceback / Error:\n$err\n[Exited with error in ${elapsed}s]\n"
                                         isRunning = false
-                                        executionStatus = "Error"
+                                        executionStatus = if (lineNum > 0) "Error (Line $lineNum)" else "Error"
+                                        errorLineNumber = lineNum
                                     },
                                     onFinished = { _, elapsed ->
                                         terminalOutput += "\n[Process completed in ${elapsed}s]\n"
                                         isRunning = false
                                         executionStatus = "Finished ($elapsed s)"
+                                    },
+                                    onPromptRequest = { msg, def, res ->
+                                        activeJsPromptMessage = msg
+                                        activeJsPromptDefault = def
+                                        activeJsPromptResult = res
                                     }
                                 )
                             }
                         }
 
-                        // ── JavaScript Runner ────────────────────────────────
-                        isJs -> {
+                        // ── 3. JavaScript & TypeScript V8 Runner ──────────────
+                        isJsOrTs -> {
                             Column(modifier = Modifier.fillMaxSize()) {
                                 Surface(
-                                    color = if (isDarkMode) Color(0xFF181824) else Color(0xFFEAEAEA),
+                                    color = if (isDarkMode) Color(0xFF16161E) else Color(0xFFEAEAEA),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -368,7 +513,8 @@ fun CodeRunnerDialog(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "JavaScript V8 Engine",
+                                            text = if (language == SupportedLanguage.TYPESCRIPT || fileName.endsWith(".ts", true))
+                                                "TypeScript + V8 Async Engine" else "JavaScript V8 Async Engine",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium,
                                             color = contentColor
@@ -377,7 +523,8 @@ fun CodeRunnerDialog(
                                         Text(
                                             text = executionStatus,
                                             fontSize = 12.sp,
-                                            color = Color(0xFF4CAF50)
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (executionStatus.contains("Error", true)) Color(0xFFE06C75) else Color(0xFF4CAF50)
                                         )
                                     }
                                 }
@@ -386,27 +533,30 @@ fun CodeRunnerDialog(
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
-                                        .background(Color(0xFF14141E))
+                                        .background(Color(0xFF11121A))
                                         .verticalScroll(terminalScrollState)
                                         .padding(12.dp)
                                 ) {
                                     Text(
-                                        text = terminalOutput.ifEmpty { "Running JavaScript..." },
-                                        color = Color(0xFFE0E0E0),
+                                        text = terminalOutput.ifEmpty { "Running script..." },
+                                        color = Color(0xFFE5E9F0),
                                         fontFamily = FontFamily.Monospace,
                                         fontSize = 13.sp,
-                                        lineHeight = 18.sp
+                                        lineHeight = 19.sp
                                     )
                                 }
 
-                                HeadlessJsRunner(
+                                HeadlessJsTsRunner(
                                     code = code,
+                                    isTypeScript = language == SupportedLanguage.TYPESCRIPT ||
+                                        fileName.endsWith(".ts", true) || fileName.endsWith(".tsx", true),
                                     runKey = runKey,
                                     onStdout = { text -> terminalOutput += text },
-                                    onError = { err, elapsed ->
+                                    onError = { err, elapsed, lineNum ->
                                         terminalOutput += "\nUncaught Exception: $err\n[Process exited in ${elapsed}s]\n"
                                         isRunning = false
-                                        executionStatus = "Error"
+                                        executionStatus = if (lineNum > 0) "Error (Line $lineNum)" else "Error"
+                                        errorLineNumber = lineNum
                                     },
                                     onFinished = { _, elapsed ->
                                         terminalOutput += "\n[Process completed in ${elapsed}s]\n"
@@ -417,7 +567,71 @@ fun CodeRunnerDialog(
                             }
                         }
 
-                        // ── Markdown Preview ──────────────────────────────────
+                        // ── 4. CSS Live Sandbox Preview ───────────────────────
+                        isCss -> {
+                            val cssSandboxHtml = remember(code, runKey) {
+                                """
+                                <!DOCTYPE html>
+                                <html>
+                                <head>
+                                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                    <style>$code</style>
+                                </head>
+                                <body>
+                                    <div class="container card">
+                                        <h1>CSS Live Sandbox Preview</h1>
+                                        <p>Your stylesheet (<b>$fileName</b>) is applied live to these sample elements:</p>
+                                        <button class="btn button primary">Sample Button</button>
+                                        <hr style="margin:16px 0;opacity:0.2;"/>
+                                        <div class="box">Box / Card Element (<code>.box</code>, <code>.card</code>)</div>
+                                    </div>
+                                </body>
+                                </html>
+                                """.trimIndent()
+                            }
+                            HtmlPreviewView(
+                                htmlCode = cssSandboxHtml,
+                                runKey = runKey,
+                                onConsole = { _, _ -> },
+                                onPromptRequest = { _, _, res -> res.cancel() },
+                                onWebViewReady = { webViewRef = it }
+                            )
+                        }
+
+                        // ── 5. JSON Validator & Pretty Inspector ──────────────
+                        isJson -> {
+                            val jsonReport = remember(code, runKey) {
+                                try {
+                                    val t = code.trim()
+                                    if (t.startsWith("[")) {
+                                        val arr = JSONArray(t)
+                                        "✓ Valid JSON Array (${arr.length()} items)\n\n" + arr.toString(2)
+                                    } else {
+                                        val obj = JSONObject(t)
+                                        "✓ Valid JSON Object (${obj.length()} top-level keys)\n\n" + obj.toString(2)
+                                    }
+                                } catch (e: Exception) {
+                                    "✗ Invalid JSON Syntax:\n${e.message}\n\nRaw Source:\n$code"
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFF11121A))
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(14.dp)
+                            ) {
+                                Text(
+                                    text = jsonReport,
+                                    color = if (jsonReport.startsWith("✓")) Color(0xFF98C379) else Color(0xFFE06C75),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 13.sp,
+                                    lineHeight = 19.sp
+                                )
+                            }
+                        }
+
+                        // ── 6. Markdown Preview ───────────────────────────────
                         isMarkdown -> {
                             MarkdownPreviewView(
                                 markdown = code,
@@ -427,15 +641,32 @@ fun CodeRunnerDialog(
                             )
                         }
 
-                        // ── Fallback ──────────────────────────────────────────
+                        // ── 7. Shell / Batch / SQL Static Execution Dry-Run ───
                         else -> {
+                            val lines = remember(code) { code.split('\n') }
                             Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFF11121A))
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(14.dp)
                             ) {
                                 Text(
-                                    text = "Preview / Runner is not available for $fileName",
-                                    color = contentColor
+                                    text = buildString {
+                                        appendLine("=== ${language.displayName} Script Analysis ($fileName) ===")
+                                        appendLine("Total Lines: ${lines.size} • Size: ${code.toByteArray().size} bytes")
+                                        appendLine("------------------------------------------------")
+                                        lines.forEachIndexed { idx, l ->
+                                            val t = l.trim()
+                                            if (t.isNotEmpty() && !t.startsWith("#") && !t.startsWith("--") && !t.startsWith("::")) {
+                                                appendLine("[Step ${idx + 1}] $t")
+                                            }
+                                        }
+                                    },
+                                    color = Color(0xFFE5E9F0),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 13.sp,
+                                    lineHeight = 19.sp
                                 )
                             }
                         }
@@ -444,9 +675,79 @@ fun CodeRunnerDialog(
             }
         }
     }
+
+    // ── Interactive Prompt Dialog for Python input() & JS prompt() ────────────
+    if (activeJsPromptMessage != null && activeJsPromptResult != null) {
+        var userInput by remember(activeJsPromptMessage) { mutableStateOf(activeJsPromptDefault) }
+        AlertDialog(
+            onDismissRequest = {
+                activeJsPromptResult?.cancel()
+                activeJsPromptMessage = null
+                activeJsPromptResult = null
+            },
+            title = { Text("Program Input Required", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column {
+                    Text(
+                        text = activeJsPromptMessage ?: "Enter input:",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = userInput,
+                        onValueChange = { userInput = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    activeJsPromptResult?.confirm(userInput)
+                    activeJsPromptMessage = null
+                    activeJsPromptResult = null
+                }) {
+                    Text("Submit")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    activeJsPromptResult?.cancel()
+                    activeJsPromptMessage = null
+                    activeJsPromptResult = null
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
-// ── HTML Preview Component with Console Interceptor ──────────────────────────
+/**
+ * Resolves <link rel="stylesheet" href="..."> and <script src="..."> against open tabs
+ * so multi-file HTML + CSS + JS projects work seamlessly inside CPhone!
+ */
+private fun bundleHtmlWithOpenTabs(html: String, openTabs: List<EditorTab>): String {
+    var result = html
+    openTabs.forEach { tab ->
+        val name = Regex.escape(tab.fileName)
+        if (tab.fileName.endsWith(".css", ignoreCase = true)) {
+            val linkRegex = Regex("""<link[^>]*href=["'](?:\./)?$name["'][^>]*>""", RegexOption.IGNORE_CASE)
+            if (linkRegex.containsMatchIn(result)) {
+                result = linkRegex.replace(result, "<style>\n${tab.state.text}\n</style>")
+            }
+        } else if (tab.fileName.endsWith(".js", ignoreCase = true)) {
+            val scriptRegex = Regex("""<script[^>]*src=["'](?:\./)?$name["'][^>]*>\s*</script>""", RegexOption.IGNORE_CASE)
+            if (scriptRegex.containsMatchIn(result)) {
+                result = scriptRegex.replace(result, "<script>\n${tab.state.text}\n</script>")
+            }
+        }
+    }
+    return result
+}
+
+// ── HTML Preview Component with Console & Prompt Interceptor ─────────────────
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -454,6 +755,7 @@ private fun HtmlPreviewView(
     htmlCode: String,
     runKey: Int,
     onConsole: (String, String) -> Unit,
+    onPromptRequest: (String, String, JsPromptResult) -> Unit,
     onWebViewReady: (WebView) -> Unit
 ) {
     val consoleInject = """
@@ -461,7 +763,7 @@ private fun HtmlPreviewView(
         (function() {
             function send(type, args) {
                 var str = Array.prototype.slice.call(args).map(function(a) {
-                    try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
+                    try { return typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a); }
                     catch(e) { return String(a); }
                 }).join(' ');
                 if (window.AndroidRunner) {
@@ -474,7 +776,7 @@ private fun HtmlPreviewView(
             console.error = function() { send('error', arguments); _error && _error.apply(console, arguments); };
             console.info = function() { send('info', arguments); _info && _info.apply(console, arguments); };
             window.onerror = function(msg, url, line) {
-                send('error', ['Uncaught error: ' + msg + ' (line ' + line + ')']);
+                send('error', ['Uncaught Error: ' + msg + ' (line ' + line + ')']);
             };
         })();
         </script>
@@ -496,12 +798,26 @@ private fun HtmlPreviewView(
                     settings.allowFileAccess = true
                     settings.useWideViewPort = true
                     settings.loadWithOverviewMode = true
-                    webChromeClient = WebChromeClient()
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onJsPrompt(
+                            view: WebView?,
+                            url: String?,
+                            message: String?,
+                            defaultValue: String?,
+                            result: JsPromptResult?
+                        ): Boolean {
+                            if (result != null) {
+                                onPromptRequest(message ?: "Input:", defaultValue ?: "", result)
+                                return true
+                            }
+                            return super.onJsPrompt(view, url, message, defaultValue, result)
+                        }
+                    }
                     webViewClient = WebViewClient()
                     addJavascriptInterface(
                         AndroidRunnerInterface(
                             onStdoutCallback = {},
-                            onErrorCallback = { _, _ -> },
+                            onErrorCallback = { _, _, _ -> },
                             onFinishedCallback = { _, _ -> },
                             onConsoleCallback = onConsole
                         ),
@@ -518,46 +834,93 @@ private fun HtmlPreviewView(
     }
 }
 
-// ── Headless Python Runner using Skulpt offline engine ────────────────────────
+// ── Python 3 Runner using Skulpt + Stdin Queue + Turtle Graphics ─────────────
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun HeadlessPythonRunner(
+private fun PythonWebViewRunner(
     code: String,
+    stdinLines: String,
+    showTurtleCanvas: Boolean,
     runKey: Int,
     onStdout: (String) -> Unit,
-    onError: (String, String) -> Unit,
-    onFinished: (Int, String) -> Unit
+    onError: (String, String, Int) -> Unit,
+    onFinished: (Int, String) -> Unit,
+    onPromptRequest: (String, String, JsPromptResult) -> Unit
 ) {
-    val encoded = Base64.encodeToString(code.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+    val encodedCode = Base64.encodeToString(code.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+    val encodedStdin = Base64.encodeToString(stdinLines.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
 
     val hostHtml = """
         <!DOCTYPE html>
         <html>
         <head>
+            <meta charset="UTF-8">
             <script src="file:///android_asset/runner/skulpt.min.js"></script>
             <script src="file:///android_asset/runner/skulpt-stdlib.js"></script>
+            <style>
+                body { margin: 0; padding: 8px; background: #181825; color: #cdd6f4; display: flex; justify-content: center; }
+                #turtle-canvas { background: #ffffff; border-radius: 8px; }
+            </style>
         </head>
         <body>
+        <div id="turtle-canvas"></div>
         <script>
+            function decodeUtf8(b64) {
+                var bin = atob(b64);
+                var bytes = new Uint8Array(bin.length);
+                for (var i = 0; i < bin.length; i++) {
+                    bytes[i] = bin.charCodeAt(i);
+                }
+                return new TextDecoder("utf-8").decode(bytes);
+            }
+
+            var rawStdin = decodeUtf8("$encodedStdin");
+            var stdinQueue = rawStdin.length > 0 ? rawStdin.split(/\r?\n/) : [];
+            var stdinIndex = 0;
+
             function outf(text) {
                 if (window.AndroidRunner) window.AndroidRunner.onStdout(text);
             }
+
             function builtinRead(x) {
                 if (Sk.builtinFiles === undefined || Sk.builtinFiles["files"][x] === undefined)
                     throw "File not found: '" + x + "'";
                 return Sk.builtinFiles["files"][x];
             }
+
+            function inputFun(promptText) {
+                if (promptText) outf(promptText);
+                if (stdinIndex < stdinQueue.length) {
+                    var val = stdinQueue[stdinIndex++];
+                    outf(val + "\n");
+                    return val;
+                }
+                var userVal = window.prompt(promptText || "Python input():", "");
+                var finalVal = userVal !== null ? userVal : "";
+                outf(finalVal + "\n");
+                return finalVal;
+            }
+
             function run() {
                 var startTime = Date.now();
                 Sk.pre = "output";
+                Sk.execLimit = 25000;
+                Sk.yieldLimit = 100;
+                (Sk.TurtleGraphics || (Sk.TurtleGraphics = {})).target = 'turtle-canvas';
+                Sk.TurtleGraphics.width = 340;
+                Sk.TurtleGraphics.height = 240;
+
                 Sk.configure({
                     output: outf,
                     read: builtinRead,
+                    inputfun: inputFun,
+                    inputfunTakesPrompt: true,
                     __future__: Sk.python3
                 });
+
                 try {
-                    var prog = decodeURIComponent(escape(atob("$encoded")));
+                    var prog = decodeUtf8("$encodedCode");
                     var myPromise = Sk.misceval.asyncToPromise(function() {
                         return Sk.importMainWithBody("<stdin>", false, prog, true);
                     });
@@ -581,11 +944,37 @@ private fun HeadlessPythonRunner(
 
     key(runKey) {
         AndroidView(
-            modifier = Modifier.size(0.dp),
+            modifier = if (showTurtleCanvas) Modifier.fillMaxWidth().height(260.dp) else Modifier.size(1.dp),
             factory = { ctx ->
                 WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.allowFileAccess = true
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onJsPrompt(
+                            view: WebView?,
+                            url: String?,
+                            message: String?,
+                            defaultValue: String?,
+                            result: JsPromptResult?
+                        ): Boolean {
+                            if (result != null) {
+                                onPromptRequest(message ?: "Python input():", defaultValue ?: "", result)
+                                return true
+                            }
+                            return super.onJsPrompt(view, url, message, defaultValue, result)
+                        }
+
+                        override fun onJsAlert(
+                            view: WebView?,
+                            url: String?,
+                            message: String?,
+                            result: JsResult?
+                        ): Boolean {
+                            onStdout((message ?: "") + "\n")
+                            result?.confirm()
+                            return true
+                        }
+                    }
                     addJavascriptInterface(
                         AndroidRunnerInterface(
                             onStdoutCallback = onStdout,
@@ -602,15 +991,16 @@ private fun HeadlessPythonRunner(
     }
 }
 
-// ── Headless JavaScript Runner ───────────────────────────────────────────────
+// ── Headless JavaScript & TypeScript V8 Runner ───────────────────────────────
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun HeadlessJsRunner(
+private fun HeadlessJsTsRunner(
     code: String,
+    isTypeScript: Boolean,
     runKey: Int,
     onStdout: (String) -> Unit,
-    onError: (String, String) -> Unit,
+    onError: (String, String, Int) -> Unit,
     onFinished: (Int, String) -> Unit
 ) {
     val encoded = Base64.encodeToString(code.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
@@ -620,12 +1010,28 @@ private fun HeadlessJsRunner(
         <html>
         <body>
         <script>
-            (function() {
+            function decodeUtf8(b64) {
+                var bin = atob(b64);
+                var bytes = new Uint8Array(bin.length);
+                for (var i = 0; i < bin.length; i++) {
+                    bytes[i] = bin.charCodeAt(i);
+                }
+                return new TextDecoder("utf-8").decode(bytes);
+            }
+
+            function transpileTypeScript(ts) {
+                return ts
+                    .replace(/^\s*interface\s+\w+[\s\S]*?^\}/gm, '')
+                    .replace(/^\s*type\s+\w+\s*=[^;]+;/gm, '')
+                    .replace(/:\s*(?:string|number|boolean|any|void|unknown|never|Record<[^>]+>|Array<[^>]+>|\w+\[\]|"[^"]*"(?:\s*\|\s*"[^"]*")*)(?=\s*[=,)\];{])/g, '')
+                    .replace(/\b(?:public|private|protected|readonly)\s+/g, '');
+            }
+
+            (async function() {
                 var startTime = Date.now();
-                var logStr = "";
                 var _log = function() {
                     var line = Array.prototype.slice.call(arguments).map(function(a) {
-                        try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
+                        try { return typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a); }
                         catch(e) { return String(a); }
                     }).join(' ');
                     if (window.AndroidRunner) window.AndroidRunner.onStdout(line + "\n");
@@ -636,8 +1042,11 @@ private fun HeadlessJsRunner(
                 console.error = _log;
 
                 try {
-                    var script = decodeURIComponent(escape(atob("$encoded")));
-                    var result = window.eval(script);
+                    var rawScript = decodeUtf8("$encoded");
+                    var executable = $isTypeScript ? transpileTypeScript(rawScript) : rawScript;
+                    var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+                    var fn = new AsyncFunction(executable);
+                    var result = await fn();
                     if (result !== undefined) {
                         if (window.AndroidRunner) window.AndroidRunner.onStdout("=> " + String(result) + "\n");
                     }
@@ -645,7 +1054,8 @@ private fun HeadlessJsRunner(
                     if (window.AndroidRunner) window.AndroidRunner.onFinished(0, elapsed);
                 } catch(e) {
                     var elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-                    if (window.AndroidRunner) window.AndroidRunner.onError(e.toString(), elapsed);
+                    var errMsg = (e && e.stack) ? e.stack.toString() : String(e);
+                    if (window.AndroidRunner) window.AndroidRunner.onError(errMsg, elapsed);
                 }
             })();
         </script>
@@ -655,7 +1065,7 @@ private fun HeadlessJsRunner(
 
     key(runKey) {
         AndroidView(
-            modifier = Modifier.size(0.dp),
+            modifier = Modifier.size(1.dp),
             factory = { ctx ->
                 WebView(ctx).apply {
                     settings.javaScriptEnabled = true
@@ -695,6 +1105,7 @@ private fun MarkdownPreviewView(
         <!DOCTYPE html>
         <html>
         <head>
+            <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <script src="file:///android_asset/runner/marked.min.js"></script>
             <style>
@@ -737,7 +1148,10 @@ private fun MarkdownPreviewView(
         <body>
         <div id="content"></div>
         <script>
-            var raw = decodeURIComponent(escape(atob("$encoded")));
+            var bin = atob("$encoded");
+            var bytes = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            var raw = new TextDecoder("utf-8").decode(bytes);
             document.getElementById('content').innerHTML = marked.parse(raw);
         </script>
         </body>
@@ -767,8 +1181,7 @@ private fun MarkdownPreviewView(
 @Composable
 private fun ConsoleLogList(
     logs: List<ConsoleLogItem>,
-    isDarkMode: Boolean,
-    onClear: () -> Unit
+    isDarkMode: Boolean
 ) {
     if (logs.isEmpty()) {
         Box(
@@ -776,7 +1189,7 @@ private fun ConsoleLogList(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "No console output.\nUse console.log() in your scripts.",
+                text = "No console output yet.\nUse console.log() or evaluate an expression below.",
                 color = if (isDarkMode) Color(0xFF6C7086) else Color(0xFF8C9098),
                 fontSize = 14.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center

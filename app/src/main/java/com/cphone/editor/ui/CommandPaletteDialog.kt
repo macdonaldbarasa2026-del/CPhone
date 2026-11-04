@@ -43,6 +43,8 @@ data class IdeCommandItem(
 fun CommandPaletteDialog(
     isDarkMode: Boolean,
     onRunCode: () -> Unit,
+    onOpenTerminal: () -> Unit = {},
+    onRunInTermux: () -> Unit = {},
     onFormatCode: () -> Unit,
     onToggleComment: () -> Unit,
     onDuplicateLine: () -> Unit,
@@ -73,6 +75,12 @@ fun CommandPaletteDialog(
 
     val commands = remember {
         listOf(
+            IdeCommandItem("terminal", "Open Interactive Terminal", "Launch embedded Linux shell & Termux console", ">_ Term", Icons.Default.Terminal, Color(0xFF61AFEF)) {
+                onDismiss(); onOpenTerminal()
+            },
+            IdeCommandItem("termux", "Run in Termux App", "Dispatch active file directly to Termux session", "Termux", Icons.Default.OpenInNew, Color(0xFF4CAF50)) {
+                onDismiss(); onRunInTermux()
+            },
             IdeCommandItem("run", "Run / Compile Code", "Execute Python, JS/TS, HTML, CSS, JSON, Markdown", "▶ Run", Icons.Default.PlayArrow, Color(0xFF4CAF50)) {
                 onDismiss(); onRunCode()
             },

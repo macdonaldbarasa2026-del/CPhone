@@ -32,6 +32,7 @@ fun TopNavigationBar(
     bugCount: Int = 0,
     warningCount: Int = 0,
     onPlayClick: () -> Unit = {},
+    onTerminalClick: () -> Unit = {},
     onTitleClick: () -> Unit = {},
     onBugPillClick: () -> Unit = {},
     onCommandPaletteClick: () -> Unit = {},
@@ -169,7 +170,20 @@ fun TopNavigationBar(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(3.dp))
+            }
+
+            // Terminal / Termux Shell Button
+            IconButton(
+                onClick = onTerminalClick,
+                modifier = Modifier.size(38.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Terminal,
+                    contentDescription = "Terminal / Termux Shell",
+                    tint = contentColor,
+                    modifier = Modifier.size(22.dp)
+                )
             }
 
             // Pencil / Quick Edit Menu (Paste, Copy, Cut, Select All, Go to Line, Format)
@@ -301,6 +315,14 @@ fun TopNavigationBar(
                             onClick = { menuExpanded = false; onPlayClick() }
                         )
                     }
+                    DropdownMenuItem(
+                        text = { Text("Terminal / Termux Shell ( >_ )", color = menuTextColor, fontWeight = FontWeight.Medium) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Terminal, contentDescription = null, tint = Color(0xFF61AFEF), modifier = Modifier.size(20.dp))
+                        },
+                        colors = menuItemColors,
+                        onClick = { menuExpanded = false; onTerminalClick() }
+                    )
                     DropdownMenuItem(
                         text = { Text("Command Palette (⌘)", color = menuTextColor) },
                         colors = menuItemColors,

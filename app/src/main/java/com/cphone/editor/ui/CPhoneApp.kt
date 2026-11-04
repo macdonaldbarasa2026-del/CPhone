@@ -27,6 +27,7 @@ import com.cphone.editor.EditorViewModel
 import com.cphone.editor.model.SupportedLanguage
 import com.cphone.editor.syntax.SyntaxHighlighter
 import com.cphone.editor.tools.DiagnosticSeverity
+import com.cphone.editor.ui.TerminalDialog
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,6 +74,7 @@ fun CPhoneApp(
     val codeTrailsInitialTab by viewModel.codeTrailsInitialTab.collectAsState()
     val isSnippetsOpen by viewModel.isSnippetsOpen.collectAsState()
     val isGoToLineOpen by viewModel.isGoToLineOpen.collectAsState()
+    val isTerminalOpen by viewModel.isTerminalOpen.collectAsState()
 
     var tabToCloseId by remember { mutableStateOf<String?>(null) }
     // By default, symbol buttons ({}, [], etc.) are hidden; tapping the bottom-right '^' circle button reveals/hides them
@@ -222,6 +224,7 @@ fun CPhoneApp(
             bugCount = bugCount,
             warningCount = warnCount,
             onPlayClick = { viewModel.setCodeRunnerOpen(true) },
+            onTerminalClick = { viewModel.setTerminalOpen(true) },
             onTitleClick = { viewModel.setRenameDialogOpen(true) },
             onBugPillClick = { viewModel.setCodeTrailsOpen(true, initialTab = 0) },
             onCommandPaletteClick = { viewModel.setCommandPaletteOpen(true) },
@@ -358,6 +361,7 @@ fun CPhoneApp(
             isRunnable = isRunnable,
             isSymbolsRevealed = isSymbolsRevealed,
             onPlay = { viewModel.setCodeRunnerOpen(true) },
+            onTerminal = { viewModel.setTerminalOpen(true) },
             onUndo = { viewModel.undo() },
             onRedo = { viewModel.redo() },
             onTab = { insertTab() },
@@ -419,7 +423,9 @@ fun CPhoneApp(
             },
             onSelectTheme = { viewModel.setEditorTheme(it) },
             onSelectLanguage = { viewModel.changeLanguage(it) },
-            onDismiss = { viewModel.setCommandPaletteOpen(false) }
+            onDismiss = { viewModel.setCommandPaletteOpen(false) },
+            onOpenTerminal = { viewModel.setTerminalOpen(true) },
+            onRunInTermux = { viewModel.runCurrentFileInTerminal(useTermuxApp = true) }
         )
     }
 
@@ -539,6 +545,7 @@ fun CPhoneApp(
             openTabs = tabs,
             isDarkMode = isDark,
             onJumpToLine = { errLine -> viewModel.goToLine(errLine, 1) },
+            onOpenTerminal = { viewModel.setTerminalOpen(true) },
             onDismiss = { viewModel.setCodeRunnerOpen(false) }
         )
     }
@@ -551,6 +558,15 @@ fun CPhoneApp(
                 viewModel.setRenameDialogOpen(false)
             },
             onDismiss = { viewModel.setRenameDialogOpen(false) }
+        )
+    }
+
+    if (isTerminalOpen) {
+        TerminalDialog(
+            terminalSession = viewModel.terminalSession,
+            activeTab = activeTab,
+            isDarkMode = isDark,
+            onDismiss = { viewModel.setTerminalOpen(false) }
         )
     }
 

@@ -96,6 +96,7 @@ fun CodeRunnerDialog(
     openTabs: List<EditorTab> = emptyList(),
     isDarkMode: Boolean,
     onJumpToLine: (Int) -> Unit = {},
+    onOpenTerminal: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -241,6 +242,20 @@ fun CodeRunnerDialog(
                                 Text("Line $errorLineNumber Bug", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                             Spacer(modifier = Modifier.width(4.dp))
+                        }
+
+                        // Quick switch to Full Terminal / Termux button
+                        if (onOpenTerminal != null) {
+                            IconButton(onClick = {
+                                onDismiss()
+                                onOpenTerminal()
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Terminal,
+                                    contentDescription = "Switch to Terminal / Termux",
+                                    tint = Color(0xFF61AFEF)
+                                )
+                            }
                         }
 
                         // Copy output button for terminal runners
@@ -641,7 +656,7 @@ fun CodeRunnerDialog(
                             )
                         }
 
-                        // ── 7. Shell / Batch / SQL Static Execution Dry-Run ───
+                        // ── 7. Compiled Languages & Scripts (C++, Rust, Go, Kotlin, Java, Shell, etc.) ───
                         else -> {
                             val lines = remember(code) { code.split('\n') }
                             Box(
@@ -651,23 +666,41 @@ fun CodeRunnerDialog(
                                     .verticalScroll(rememberScrollState())
                                     .padding(14.dp)
                             ) {
-                                Text(
-                                    text = buildString {
-                                        appendLine("=== ${language.displayName} Script Analysis ($fileName) ===")
-                                        appendLine("Total Lines: ${lines.size} • Size: ${code.toByteArray().size} bytes")
-                                        appendLine("------------------------------------------------")
-                                        lines.forEachIndexed { idx, l ->
-                                            val t = l.trim()
-                                            if (t.isNotEmpty() && !t.startsWith("#") && !t.startsWith("--") && !t.startsWith("::")) {
-                                                appendLine("[Step ${idx + 1}] $t")
-                                            }
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    if (onOpenTerminal != null) {
+                                        Button(
+                                            onClick = {
+                                                onDismiss()
+                                                onOpenTerminal()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("⚡ Compile & Execute in CPhone Terminal / Termux", fontWeight = FontWeight.Bold)
                                         }
-                                    },
-                                    color = Color(0xFFE5E9F0),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 13.sp,
-                                    lineHeight = 19.sp
-                                )
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                    }
+
+                                    Text(
+                                        text = buildString {
+                                            appendLine("=== ${language.displayName} Script Analysis ($fileName) ===")
+                                            appendLine("Total Lines: ${lines.size} • Size: ${code.toByteArray().size} bytes")
+                                            appendLine("------------------------------------------------")
+                                            lines.forEachIndexed { idx, l ->
+                                                val t = l.trim()
+                                                if (t.isNotEmpty() && !t.startsWith("#") && !t.startsWith("--") && !t.startsWith("::")) {
+                                                    appendLine("[Step ${idx + 1}] $t")
+                                                }
+                                            }
+                                        },
+                                        color = Color(0xFFE5E9F0),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 13.sp,
+                                        lineHeight = 19.sp
+                                    )
+                                }
                             }
                         }
                     }

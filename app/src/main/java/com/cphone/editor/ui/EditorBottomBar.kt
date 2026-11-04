@@ -43,6 +43,7 @@ fun EditorBottomBar(
     isRunnable: Boolean = false,
     isSymbolsRevealed: Boolean = false,
     onPlay: () -> Unit = {},
+    onTerminal: () -> Unit = {},
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onTab: () -> Unit,
@@ -299,6 +300,34 @@ fun EditorBottomBar(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+                }
+
+                // >_ Terminal / Termux button
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF61AFEF).copy(alpha = 0.15f),
+                    modifier = Modifier
+                        .height(34.dp)
+                        .clickable { onTerminal() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Terminal,
+                            contentDescription = "Terminal",
+                            tint = Color(0xFF61AFEF),
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "Term",
+                            color = Color(0xFF61AFEF),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 

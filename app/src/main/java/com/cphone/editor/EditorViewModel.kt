@@ -10,6 +10,8 @@ import com.cphone.editor.model.EditorSettings
 import com.cphone.editor.model.EditorTab
 import com.cphone.editor.model.RecentFile
 import com.cphone.editor.model.SupportedLanguage
+import com.cphone.editor.terminal.TerminalSession
+import com.cphone.editor.terminal.TermuxBridge
 import com.cphone.editor.tools.CodeAnalyzer
 import com.cphone.editor.tools.CodeDiagnostic
 import com.cphone.editor.tools.CodeSymbol
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 import kotlin.math.abs
 
@@ -818,6 +821,35 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     val codeTrailsInitialTab: StateFlow<Int>     = _codeTrailsInitialTab.asStateFlow()
     val isSnippetsOpen:       StateFlow<Boolean> = _isSnippetsOpen.asStateFlow()
     val isGoToLineOpen:       StateFlow<Boolean> = _isGoToLineOpen.asStateFlow()
+
+    // ── Interactive Terminal Engine & Termux Bridge ──────────────────────────
+    val terminalSession = TerminalSession(application)
+    private val _isTerminalOpen = MutableStateFlow(false)
+    val isTerminalOpen: StateFlow<Boolean> = _isTerminalOpen.asStateFlow()
+
+    fun setTerminalOpen(v: Boolean) { _isTerminalOpen.value = v }
+
+    fun runCurrentFileInTerminal(useTermuxApp: Boolean = false) {
+        val tab = currentTab
+        if (useTermuxApp) {
+            val cmd = TermuxBridge.getCompileAndRunCommand(tab.fileName, tab.language)
+            val file = File(terminalSession.workspaceDir, tab.fileName)
+            try { file.writeText(tab.state.text, Charsets.UTF_8) } catch (_: Exception) {}
+            TermuxBridge.runInTermux(
+                context = getApplication(),
+                command = "cd \"${terminalSession.workspaceDir.absolutePath}\" && $cmd",
+                workDir = terminalSession.workspaceDir.absolutePath
+            )
+        } else {
+            terminalSession.runEditorFile(tab.fileName, tab.state.text, tab.language)
+            _isTerminalOpen.value = true
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        terminalSession.stopShell()
+    }
 
     fun setInfoDialogOpen(v: Boolean)       { _isInfoOpen.value = v }
     fun setSettingsDialogOpen(v: Boolean)   { _isSettingsOpen.value = v }

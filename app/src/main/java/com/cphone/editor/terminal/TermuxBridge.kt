@@ -12,6 +12,8 @@ import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
+typealias ResultCallback = (stdout: String?, stderr: String?, exitCode: Int, errmsg: String?) -> Unit
+
 /**
  * Termux Integration Bridge for CPhone IDE.
  * Allows bi-directional syncing, binary detection, direct process execution,
@@ -39,7 +41,6 @@ object TermuxBridge {
     const val TERMUX_LIB = "$TERMUX_PREFIX/lib"
     const val TERMUX_TMP = "$TERMUX_PREFIX/tmp"
 
-    typealias ResultCallback = (stdout: String?, stderr: String?, exitCode: Int, errmsg: String?) -> Unit
     private val callbacks = ConcurrentHashMap<String, ResultCallback>()
     var globalResultListener: ((commandId: String, stdout: String?, stderr: String?, exitCode: Int, errmsg: String?) -> Unit)? = null
 

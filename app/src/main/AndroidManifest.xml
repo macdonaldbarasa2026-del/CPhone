@@ -60,6 +60,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Termux command execution result receiver -->
+        <receiver
+            android:name=".terminal.TermuxCommandResultReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.cphone.editor.termux.RESULT" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

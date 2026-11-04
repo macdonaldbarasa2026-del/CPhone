@@ -1,14 +1,21 @@
 package com.cphone.editor.terminal
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import com.cphone.editor.model.SupportedLanguage
 import java.io.File
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Termux Integration Bridge for CPhone IDE.
- * Allows bi-directional syncing, binary detection, and remote execution via Termux RUN_COMMAND.
+ * Allows bi-directional syncing, binary detection, direct process execution,
+ * socket bridge connection to Termux server (127.0.0.1), and remote execution via Termux RUN_COMMAND.
  */
 object TermuxBridge {
 
@@ -21,10 +28,37 @@ object TermuxBridge {
     const val EXTRA_RUN_COMMAND_WORKDIR = "com.termux.RUN_COMMAND_WORKDIR"
     const val EXTRA_RUN_COMMAND_BACKGROUND = "com.termux.RUN_COMMAND_BACKGROUND"
     const val EXTRA_RUN_COMMAND_SESSION_ACTION = "com.termux.RUN_COMMAND_SESSION_ACTION"
+    const val EXTRA_RUN_COMMAND_PENDING_INTENT = "com.termux.RUN_COMMAND_PENDING_INTENT"
+
+    const val ACTION_COMMAND_RESULT = "com.cphone.editor.termux.RESULT"
 
     const val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
     const val TERMUX_BIN = "$TERMUX_PREFIX/bin"
+    const val TERMUX_APPLETS = "$TERMUX_BIN/applets"
     const val TERMUX_HOME = "/data/data/com.termux/files/home"
+    const val TERMUX_LIB = "$TERMUX_PREFIX/lib"
+    const val TERMUX_TMP = "$TERMUX_PREFIX/tmp"
+
+    typealias ResultCallback = (stdout: String?, stderr: String?, exitCode: Int, errmsg: String?) -> Unit
+    private val callbacks = ConcurrentHashMap<String, ResultCallback>()
+    var globalResultListener: ((commandId: String, stdout: String?, stderr: String?, exitCode: Int, errmsg: String?) -> Unit)? = null
+
+    fun registerCallback(commandId: String, callback: ResultCallback) {
+        callbacks[commandId] = callback
+    }
+
+    fun dispatchResult(
+        commandId: String,
+        stdout: String?,
+        stderr: String?,
+        exitCode: Int,
+        errCode: Int,
+        errmsg: String?
+    ) {
+        val errorDetail = if (errCode != 0 && errmsg != null) "Termux Error ($errCode): $errmsg" else errmsg
+        callbacks.remove(commandId)?.invoke(stdout, stderr, exitCode, errorDetail)
+        globalResultListener?.invoke(commandId, stdout, stderr, exitCode, errorDetail)
+    }
 
     /**
      * Checks if Termux is installed on this Android device.
@@ -47,17 +81,44 @@ object TermuxBridge {
     }
 
     /**
-     * Finds the preferred shell binary (Termux bash/sh, or Android /system/bin/sh).
+     * Finds the preferred shell binary path (Termux zsh, Termux bash, login, or fallback).
+     * Strictly targets Termux binaries first as required.
      */
     fun resolveShellPath(): String {
+        val zsh = File("$TERMUX_BIN/zsh")
+        if (zsh.exists()) return "$TERMUX_BIN/zsh"
+
+        val bash = File("$TERMUX_BIN/bash")
+        if (bash.exists()) return "$TERMUX_BIN/bash"
+
+        // Default directly to Termux bash path for ProcessBuilder
+        return "$TERMUX_BIN/bash"
+    }
+
+    /**
+     * Fallback standard Android shell when direct Termux execution is blocked by sandbox permissions.
+     */
+    fun getFallbackShellPath(): String {
         val candidates = listOf(
-            "$TERMUX_BIN/bash",
-            "$TERMUX_BIN/login",
-            "$TERMUX_BIN/sh",
             "/system/bin/sh",
-            "/system/xbin/sh"
+            "/system/xbin/sh",
+            "sh"
         )
-        return candidates.firstOrNull { File(it).canExecute() } ?: "/system/bin/sh"
+        return candidates.firstOrNull { File(it).exists() } ?: "/system/bin/sh"
+    }
+
+    /**
+     * Checks if a local socket/SSH server is listening on Termux's 127.0.0.1.
+     */
+    fun checkLocalSocketServer(host: String = "127.0.0.1", port: Int = 8022, timeoutMs: Int = 500): Boolean {
+        return try {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(host, port), timeoutMs)
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /**
@@ -79,8 +140,56 @@ object TermuxBridge {
     }
 
     /**
-     * Dispatches a command directly into Termux via RUN_COMMAND Intent service.
-     * Starts an interactive or background session in Termux with the exact working directory.
+     * Dispatches a command directly into Termux via RUN_COMMAND Intent service in background,
+     * delivering stdout, stderr, and exitCode back via PendingIntent result receiver.
+     */
+    fun executeViaRunCommand(
+        context: Context,
+        command: String,
+        workDir: String = TERMUX_HOME,
+        background: Boolean = true,
+        commandId: String = UUID.randomUUID().toString(),
+        onResult: ResultCallback? = null
+    ): Boolean {
+        if (onResult != null) {
+            callbacks[commandId] = onResult
+        }
+        return try {
+            val intent = Intent(ACTION_RUN_COMMAND).apply {
+                setClassName(TERMUX_PACKAGE, TERMUX_SERVICE)
+                putExtra(EXTRA_RUN_COMMAND_PATH, resolveShellPath())
+                putExtra(EXTRA_RUN_COMMAND_ARGUMENTS, arrayOf("-l", "-c", command))
+                putExtra(EXTRA_RUN_COMMAND_WORKDIR, workDir)
+                putExtra(EXTRA_RUN_COMMAND_BACKGROUND, background)
+                putExtra(EXTRA_RUN_COMMAND_SESSION_ACTION, if (background) "2" else "0")
+
+                val resultIntent = Intent(context, TermuxCommandResultReceiver::class.java).apply {
+                    action = ACTION_COMMAND_RESULT
+                    putExtra("command_id", commandId)
+                }
+                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                } else {
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                }
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    commandId.hashCode(),
+                    resultIntent,
+                    flags
+                )
+                putExtra(EXTRA_RUN_COMMAND_PENDING_INTENT, pendingIntent)
+            }
+            context.startService(intent)
+            true
+        } catch (e: Exception) {
+            callbacks.remove(commandId)
+            false
+        }
+    }
+
+    /**
+     * Dispatches a command directly into Termux via RUN_COMMAND Intent service (opens session in Termux app).
      */
     fun runInTermux(
         context: Context,
@@ -91,8 +200,8 @@ object TermuxBridge {
         return try {
             val intent = Intent(ACTION_RUN_COMMAND).apply {
                 setClassName(TERMUX_PACKAGE, TERMUX_SERVICE)
-                putExtra(EXTRA_RUN_COMMAND_PATH, "$TERMUX_BIN/bash")
-                putExtra(EXTRA_RUN_COMMAND_ARGUMENTS, arrayOf("-c", command))
+                putExtra(EXTRA_RUN_COMMAND_PATH, resolveShellPath())
+                putExtra(EXTRA_RUN_COMMAND_ARGUMENTS, arrayOf("-l", "-c", command))
                 putExtra(EXTRA_RUN_COMMAND_WORKDIR, workDir)
                 putExtra(EXTRA_RUN_COMMAND_BACKGROUND, background)
                 putExtra(EXTRA_RUN_COMMAND_SESSION_ACTION, "0") // 0 = open foreground session

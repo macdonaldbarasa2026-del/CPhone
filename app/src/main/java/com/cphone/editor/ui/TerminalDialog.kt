@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cphone.editor.model.EditorTab
 import com.cphone.editor.terminal.AnsiParser
+import com.cphone.editor.terminal.ExecutionBackend
 import com.cphone.editor.terminal.TerminalSession
 import com.cphone.editor.terminal.TermuxBridge
 
@@ -69,6 +70,7 @@ fun TerminalDialog(
     val keyboard = LocalSoftwareKeyboardController.current
 
     val isTermuxInstalled = remember { TermuxBridge.isTermuxInstalled(context) }
+    val backend by terminalSession.currentBackend.collectAsState()
 
     // Scroll to bottom whenever new output lines arrive
     LaunchedEffect(lines.size) {
@@ -154,18 +156,30 @@ fun TerminalDialog(
                                 overflow = TextOverflow.Ellipsis
                             )
                             // Termux Linked / Local Shell status badge — always on same line
+                            val badgeText = when {
+                                backend == ExecutionBackend.SOCKET_BRIDGE -> "Termux Socket"
+                                backend == ExecutionBackend.TERMUX_RUN_COMMAND -> "Termux Service"
+                                isTermuxInstalled -> "Termux Linked"
+                                else -> "Local Shell"
+                            }
+                            val badgeColor = if (isTermuxInstalled || backend == ExecutionBackend.SOCKET_BRIDGE) greenAccent else Color(0xFFABB2BF)
+                            val badgeBg = if (isTermuxInstalled || backend == ExecutionBackend.SOCKET_BRIDGE)
+                                greenAccent.copy(alpha = 0.18f)
+                            else
+                                Color(0xFF5C6370).copy(alpha = 0.18f)
+
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
-                                color = if (isTermuxInstalled)
-                                    greenAccent.copy(alpha = 0.18f)
-                                else
-                                    Color(0xFF5C6370).copy(alpha = 0.18f)
+                                color = badgeBg,
+                                modifier = Modifier.clickable {
+                                    terminalSession.execute("/backend")
+                                }
                             ) {
                                 Text(
-                                    text = if (isTermuxInstalled) "Termux Linked" else "Local Shell",
+                                    text = badgeText,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isTermuxInstalled) greenAccent else Color(0xFFABB2BF),
+                                    color = badgeColor,
                                     maxLines = 1,
                                     softWrap = false,
                                     overflow = TextOverflow.Clip,

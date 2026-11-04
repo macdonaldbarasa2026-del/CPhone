@@ -150,40 +150,14 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         saveRecentFiles(updated)
     }
 
-    // ── Tabs & Session Persistence ───────────────────────────────────────────
-    private val defaultWelcomeCode = """
-        # main.py — Welcome to CPhone Commercial IDE v2.0
-        # Tap ▶ Run in the top bar to execute Python, JS, TS, HTML, CSS, JSON, or Markdown!
-
-        class ProjectWorkspace:
-            def __init__(self, name: str):
-                self.name = name
-                self.modules = ["Code Trails", "Bug Inspector", "Live Runner", "Command Palette"]
-
-            def summary(self):
-                print(f"=== {self.name} ===")
-                for idx, mod in enumerate(self.modules, start=1):
-                    print(f"  {idx}. {mod} [ACTIVE]")
-
-        def calculate_fibonacci(limit: int):
-            seq = [0, 1]
-            while len(seq) < limit:
-                seq.append(seq[-1] + seq[-2])
-            return seq
-
-        if __name__ == "__main__":
-            ws = ProjectWorkspace("CPhone Mobile Studio")
-            ws.summary()
-            print("Fibonacci(10):", calculate_fibonacci(10))
-    """.trimIndent() + "\n"
-
+    // ── Tabs & Session Persistence (Starts completely blank — no pre-coded code) ──
     private val emptyTab = EditorTab(
         id       = UUID.randomUUID().toString(),
-        fileName = "main.py",
+        fileName = "untitled.txt",
         uri      = null,
-        state    = TextFieldValue(defaultWelcomeCode, TextRange(0)),
+        state    = TextFieldValue("", TextRange(0)),
         isModified = false,
-        language = SupportedLanguage.PYTHON
+        language = SupportedLanguage.PLAINTEXT
     )
 
     private val _tabs = MutableStateFlow(loadSessionTabs())
@@ -199,7 +173,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         get() = _tabs.value.firstOrNull { it.id == _activeTabId.value } ?: _tabs.value.first()
 
     private fun loadSessionTabs(): List<EditorTab> {
-        val raw = prefs.getString("session_tabs_v2", null) ?: return listOf(emptyTab)
+        val raw = prefs.getString("session_tabs_v3", null) ?: return listOf(emptyTab)
         return try {
             val arr = JSONArray(raw)
             if (arr.length() == 0) return listOf(emptyTab)
@@ -249,7 +223,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             prefs.edit()
-                .putString("session_tabs_v2", arr.toString())
+                .putString("session_tabs_v3", arr.toString())
                 .putString("active_tab_id", _activeTabId.value)
                 .apply()
         } catch (_: Exception) {}
@@ -467,6 +441,38 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun getSelectedOrCurrentLineText(): String {
+        val tab = currentTab
+        val text = tab.state.text
+        if (text.isEmpty()) return ""
+        val sel = tab.state.selection
+        if (!sel.collapsed) {
+            return text.substring(sel.min.coerceAtLeast(0), sel.max.coerceAtMost(text.length))
+        }
+        val cursor = sel.start.coerceIn(0, text.length)
+        val lineStart = text.lastIndexOf('\n', (cursor - 1).coerceAtLeast(0)).let { if (it == -1) 0 else it + 1 }
+        val lineEnd = text.indexOf('\n', cursor).let { if (it == -1) text.length else it }
+        return text.substring(lineStart, lineEnd)
+    }
+
+    fun cutSelectedOrCurrentLineText(): String {
+        val tab = currentTab
+        val text = tab.state.text
+        if (text.isEmpty()) return ""
+        val sel = tab.state.selection
+        if (!sel.collapsed) {
+            val min = sel.min.coerceAtLeast(0)
+            val max = sel.max.coerceAtMost(text.length)
+            val cutText = text.substring(min, max)
+            val updated = text.removeRange(min, max)
+            onTextChanged(TextFieldValue(updated, TextRange(min)))
+            return cutText
+        }
+        val cutLine = getSelectedOrCurrentLineText()
+        deleteLine()
+        return cutLine
+    }
+
     fun toggleLineComment() {
         val tab = currentTab
         val text = tab.state.text
@@ -661,11 +667,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         if (list.size == 1) {
             val fresh = EditorTab(
                 id = UUID.randomUUID().toString(),
-                fileName = "untitled.py",
+                fileName = "untitled.txt",
                 uri = null,
                 state = TextFieldValue("", TextRange(0)),
                 isModified = false,
-                language = SupportedLanguage.PYTHON
+                language = SupportedLanguage.PLAINTEXT
             )
             _tabs.value = listOf(fresh)
             _activeTabId.value = fresh.id

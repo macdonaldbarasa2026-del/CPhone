@@ -11,10 +11,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cphone.editor.R
 import com.cphone.editor.model.SupportedLanguage
 import com.cphone.editor.syntax.SyntaxHighlighter
 
@@ -37,6 +39,9 @@ fun TopNavigationBar(
     onFormatClick: () -> Unit = {},
     onSnippetsClick: () -> Unit = {},
     onGoToLineClick: () -> Unit = {},
+    onPasteClick: () -> Unit = {},
+    onCopyClick: () -> Unit = {},
+    onCutClick: () -> Unit = {},
     onHomeClick: () -> Unit,
     onInfoClick: () -> Unit,
     onThemeToggleClick: () -> Unit,
@@ -56,14 +61,23 @@ fun TopNavigationBar(
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var pencilMenuExpanded by remember { mutableStateOf(false) }
+
     val palette = remember(themeId, isDarkMode) {
         SyntaxHighlighter.resolvePalette(themeId, isDarkMode)
     }
 
     val barBg = if (isDarkMode) palette.topBarBg else Color.White
-    val contentColor = if (isDarkMode) palette.syntax.defaultText else Color(0xFF111827)
-    val subtitleColor = if (isDarkMode) palette.gutterText else Color(0xFF6B7280)
+    val contentColor = if (isDarkMode) Color(0xFFF3F4F6) else Color(0xFF111827)
+    val subtitleColor = if (isDarkMode) Color(0xFF9CA3AF) else Color(0xFF6B7280)
     val dividerColor = palette.borderColor
+    val menuBgColor = if (isDarkMode) Color(0xFF252936) else Color(0xFFFFFFFF)
+    val menuTextColor = if (isDarkMode) Color(0xFFF9FAFB) else Color(0xFF111827)
+    val menuItemColors = MenuDefaults.itemColors(
+        textColor = menuTextColor,
+        leadingIconColor = menuTextColor,
+        trailingIconColor = menuTextColor
+    )
 
     val cleanFileName = remember(fileName) {
         fileName.removeSuffix(" ●").trim()
@@ -85,22 +99,22 @@ fun TopNavigationBar(
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left Hamburger Menu Icon (☰) matching the screenshot
+            // Left House Icon (ic_home_outline) replacing ☰ as requested in Image 2
             IconButton(
                 onClick = onHomeClick,
-                modifier = Modifier.size(42.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Menu,
-                    contentDescription = "Menu / File Explorer",
+                    painter = painterResource(id = R.drawable.ic_home_outline),
+                    contentDescription = "Home / File Explorer",
                     tint = contentColor,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
             Spacer(modifier = Modifier.width(2.dp))
 
-            // Language Icon + Two-line File Title ("wifi_client.cpp" / "New file")
+            // Language Icon + Two-line File Title ("index.html" / "New file")
             Row(
                 modifier = Modifier
                     .weight(1f)
@@ -113,7 +127,7 @@ fun TopNavigationBar(
                     size = 22.dp
                 )
 
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Column(
                     verticalArrangement = Arrangement.Center
@@ -140,35 +154,115 @@ fun TopNavigationBar(
             if (isRunnable) {
                 IconButton(
                     onClick = onPlayClick,
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(38.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
                         contentDescription = "Run / Preview",
-                        tint = Color(0xFF2E7D32),
-                        modifier = Modifier.size(26.dp)
+                        tint = Color(0xFF4CAF50),
+                        modifier = Modifier.size(25.dp)
                     )
                 }
             }
 
-            // Pencil / Edit Icon matching the screenshot
+            // Pencil / Quick Edit Menu (Paste, Copy, Cut, Select All, Go to Line, Format)
+            Box {
+                IconButton(
+                    onClick = { pencilMenuExpanded = true },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit Tools (Paste, Copy, Cut, Select All, Go to Line, Format)",
+                        tint = contentColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = pencilMenuExpanded,
+                    onDismissRequest = { pencilMenuExpanded = false },
+                    modifier = Modifier.background(menuBgColor)
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Paste", color = menuTextColor, fontWeight = FontWeight.Medium) },
+                        leadingIcon = {
+                            Icon(Icons.Default.ContentPaste, contentDescription = null, tint = menuTextColor, modifier = Modifier.size(18.dp))
+                        },
+                        colors = menuItemColors,
+                        onClick = { pencilMenuExpanded = false; onPasteClick() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Copy", color = menuTextColor, fontWeight = FontWeight.Medium) },
+                        leadingIcon = {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = menuTextColor, modifier = Modifier.size(18.dp))
+                        },
+                        colors = menuItemColors,
+                        onClick = { pencilMenuExpanded = false; onCopyClick() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Cut", color = menuTextColor, fontWeight = FontWeight.Medium) },
+                        leadingIcon = {
+                            Icon(Icons.Default.ContentCut, contentDescription = null, tint = menuTextColor, modifier = Modifier.size(18.dp))
+                        },
+                        colors = menuItemColors,
+                        onClick = { pencilMenuExpanded = false; onCutClick() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Select All", color = menuTextColor, fontWeight = FontWeight.Medium) },
+                        leadingIcon = {
+                            Icon(Icons.Default.SelectAll, contentDescription = null, tint = menuTextColor, modifier = Modifier.size(18.dp))
+                        },
+                        colors = menuItemColors,
+                        onClick = { pencilMenuExpanded = false; onSelectAllClick() }
+                    )
+                    HorizontalDivider(color = dividerColor)
+                    DropdownMenuItem(
+                        text = { Text("Go to Line", color = menuTextColor, fontWeight = FontWeight.Medium) },
+                        leadingIcon = {
+                            Icon(Icons.Default.FormatListNumbered, contentDescription = null, tint = menuTextColor, modifier = Modifier.size(18.dp))
+                        },
+                        colors = menuItemColors,
+                        onClick = { pencilMenuExpanded = false; onGoToLineClick() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Format", color = menuTextColor, fontWeight = FontWeight.Medium) },
+                        leadingIcon = {
+                            Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = menuTextColor, modifier = Modifier.size(18.dp))
+                        },
+                        colors = menuItemColors,
+                        onClick = { pencilMenuExpanded = false; onFormatClick() }
+                    )
+                    HorizontalDivider(color = dividerColor)
+                    DropdownMenuItem(
+                        text = { Text("Rename File", color = menuTextColor, fontWeight = FontWeight.Medium) },
+                        leadingIcon = {
+                            Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null, tint = menuTextColor, modifier = Modifier.size(18.dp))
+                        },
+                        colors = menuItemColors,
+                        onClick = { pencilMenuExpanded = false; onTitleClick() }
+                    )
+                }
+            }
+
+            // Theme Droplet Icon (ic_theme_droplet) circled in Image 2 for instant theme change
             IconButton(
-                onClick = onTitleClick,
-                modifier = Modifier.size(40.dp)
+                onClick = onThemeToggleClick,
+                modifier = Modifier.size(38.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = "Rename / Quick Edit",
+                    painter = painterResource(id = R.drawable.ic_theme_droplet),
+                    contentDescription = "Change Theme (Dark / Light)",
                     tint = contentColor,
                     modifier = Modifier.size(21.dp)
                 )
             }
 
-            // Three-dot overflow menu with the small red notification dot matching the screenshot
+            // Three-dot overflow menu with high-contrast visible text (fixing Image 1)
             Box {
                 IconButton(
                     onClick = { menuExpanded = true },
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(38.dp)
                 ) {
                     Box(modifier = Modifier.size(24.dp)) {
                         Icon(
@@ -179,7 +273,6 @@ fun TopNavigationBar(
                                 .size(22.dp)
                                 .align(Alignment.Center)
                         )
-                        // Small red notification dot at bottom-right of the 3-dot icon
                         Box(
                             modifier = Modifier
                                 .size(7.dp)
@@ -192,93 +285,113 @@ fun TopNavigationBar(
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
-                    modifier = Modifier.background(if (isDarkMode) Color(0xFF242636) else Color(0xFFFFFFFF))
+                    modifier = Modifier.background(menuBgColor)
                 ) {
                     if (isRunnable) {
                         DropdownMenuItem(
-                            text = { Text("Run / Compile (▶)") },
+                            text = { Text("Run / Compile (▶)", color = menuTextColor) },
+                            colors = menuItemColors,
                             onClick = { menuExpanded = false; onPlayClick() }
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text("Command Palette (⌘)") },
+                        text = { Text("Command Palette (⌘)", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onCommandPaletteClick() }
                     )
                     DropdownMenuItem(
                         text = {
                             val badge = if (bugCount + warningCount > 0) " (${bugCount + warningCount})" else ""
-                            Text("Problems & Code Trails$badge")
+                            Text("Problems & Code Trails$badge", color = menuTextColor)
                         },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onBugPillClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Format / Beautify Code") },
+                        text = { Text("Format / Beautify Code", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onFormatClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Insert Code Snippet") },
+                        text = { Text("Insert Code Snippet", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onSnippetsClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Go to Line...") },
+                        text = { Text("Go to Line...", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onGoToLineClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text(if (isZenMode) "Exit Fullscreen Mode" else "Fullscreen Code Mode") },
+                        text = { Text(if (isZenMode) "Exit Fullscreen Mode" else "Fullscreen Code Mode", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onToggleZenClick() }
                     )
                     HorizontalDivider(color = dividerColor)
                     DropdownMenuItem(
-                        text = { Text("New File") },
+                        text = { Text("New File", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onNewFileClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Open File (Storage)") },
+                        text = { Text("Open File (Storage)", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onOpenFileClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("File Explorer") },
+                        text = { Text("File Explorer", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onFileExplorerClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Rename / Change Extension") },
+                        text = { Text("Rename / Change Extension", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onTitleClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Save") },
+                        text = { Text("Save", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onSaveClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Save As") },
+                        text = { Text("Save As", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onSaveAsClick() }
                     )
                     HorizontalDivider(color = dividerColor)
                     DropdownMenuItem(
-                        text = { Text("Find & Replace") },
+                        text = { Text("Find & Replace", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onReplaceClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Select All") },
+                        text = { Text("Select All", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onSelectAllClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("AI Coding Assistant (✦)") },
+                        text = { Text("AI Coding Assistant (✦)", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onAiAssistantClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Toggle Dark / Light Theme") },
+                        text = { Text("Toggle Dark / Light Theme", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onThemeToggleClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("File Info (ⓘ)") },
+                        text = { Text("File Info (ⓘ)", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onInfoClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("Settings") },
+                        text = { Text("Settings", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onSettingsClick() }
                     )
                     DropdownMenuItem(
-                        text = { Text("About CPhone") },
+                        text = { Text("About CPhone", color = menuTextColor) },
+                        colors = menuItemColors,
                         onClick = { menuExpanded = false; onAboutClick() }
                     )
                 }

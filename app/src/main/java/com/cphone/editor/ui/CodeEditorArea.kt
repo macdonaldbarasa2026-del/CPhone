@@ -170,9 +170,16 @@ fun CodeEditorArea(
         }
     } else Modifier
 
+    // Book-like ruled horizontal line color (matches Image 2 "BOOK LIKE" ruled lines)
+    val bookRuleLineColor = if (settings.isDarkMode) {
+        Color(0xFF2D3343)
+    } else {
+        Color(0xFFE2E8F0)
+    }
+
     val editorBackgroundDraw = Modifier.drawBehind {
         if (lineHeightPx <= 0f) return@drawBehind
-        val totalLines = max(lineCount, (size.height / lineHeightPx).toInt() + 6)
+        val totalLines = max(lineCount + 25, (size.height / lineHeightPx).toInt() + 12)
         for (i in 0 until totalLines) {
             val lineNum = i + 1
             val y = topPaddingPx + i * lineHeightPx
@@ -186,6 +193,15 @@ fun CodeEditorArea(
             if (bgColor != rowEvenColor) {
                 drawRect(color = bgColor, topLeft = Offset(0f, y), size = Size(size.width, lineHeightPx))
             }
+
+            // Book-like horizontal ruled line under every single line row
+            val lineBottomY = y + lineHeightPx
+            drawLine(
+                color = bookRuleLineColor,
+                start = Offset(0f, lineBottomY),
+                end = Offset(size.width, lineBottomY),
+                strokeWidth = 1.dp.toPx()
+            )
         }
 
         // Draw subtle vertical indent guides
@@ -199,7 +215,7 @@ fun CodeEditorArea(
                     drawLine(
                         color = guideColor,
                         start = Offset(x, topPaddingPx),
-                        end = Offset(x, topPaddingPx + lineCount * lineHeightPx),
+                        end = Offset(x, topPaddingPx + totalLines * lineHeightPx),
                         strokeWidth = 1f
                     )
                 }

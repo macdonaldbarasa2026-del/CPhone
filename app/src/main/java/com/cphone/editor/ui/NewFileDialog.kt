@@ -20,25 +20,24 @@ fun NewFileDialog(
     onConfirm: (String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var fileName by remember { mutableStateOf("script.py") }
-    var useStarterTemplate by remember { mutableStateOf(true) }
+    var fileName by remember { mutableStateOf("index.html") }
 
     val sanitizedPreview = remember(fileName) { SupportedLanguage.sanitizeFileName(fileName) }
     val detectedLanguage = remember(sanitizedPreview) { SupportedLanguage.detect(sanitizedPreview) }
 
-    val quickTemplates = listOf(
-        "script.py",
-        "docks.html",
-        "app.js",
-        "main.ts",
+    val quickExtensions = listOf(
+        "index.html",
         "style.css",
-        "config.json",
-        "README.md",
+        "app.js",
+        "main.py",
         "Main.kt",
         "main.cpp",
+        "main.ts",
+        "config.json",
+        "README.md",
         "setup.sh",
-        "netfetch.bat",
-        "schema.sql"
+        "schema.sql",
+        "notes.txt"
     )
 
     AlertDialog(
@@ -52,12 +51,16 @@ fun NewFileDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Quick file presets:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = "Choose or type any file name & extension (starts clean & empty):",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    quickTemplates.forEach { preset ->
+                    quickExtensions.forEach { preset ->
                         FilterChip(
                             selected = sanitizedPreview.equals(preset, ignoreCase = true),
                             onClick = { fileName = preset },
@@ -100,28 +103,14 @@ fun NewFileDialog(
                         )
                     }
                 }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Populate Starter Template", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Text("Pre-fill with runnable boilerplate code", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
-                    }
-                    Switch(
-                        checked = useStarterTemplate,
-                        onCheckedChange = { useStarterTemplate = it }
-                    )
-                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val cleaned = SupportedLanguage.sanitizeFileName(fileName).ifEmpty { "untitled.py" }
-                    onConfirm(cleaned, useStarterTemplate)
+                    val cleaned = SupportedLanguage.sanitizeFileName(fileName).ifEmpty { "untitled.txt" }
+                    // Always pass false for starter template so new files start completely blank
+                    onConfirm(cleaned, false)
                 }
             ) {
                 Text("Create")

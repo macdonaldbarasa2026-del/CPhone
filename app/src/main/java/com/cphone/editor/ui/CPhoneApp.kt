@@ -1,11 +1,15 @@
 package com.cphone.editor.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -21,6 +25,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import com.cphone.editor.EditorViewModel
 import com.cphone.editor.model.SupportedLanguage
+import com.cphone.editor.syntax.SyntaxHighlighter
 import com.cphone.editor.tools.DiagnosticSeverity
 import java.io.File
 
@@ -75,6 +80,36 @@ fun CPhoneApp(
 
     val bugCount = remember(diagnostics) { diagnostics.count { it.severity == DiagnosticSeverity.ERROR } }
     val warnCount = remember(diagnostics) { diagnostics.count { it.severity == DiagnosticSeverity.WARNING } }
+
+    // ── Clipboard Helpers for Pencil Menu (Paste, Copy, Cut) ─────────────────
+    fun copyToClipboard() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val textToCopy = viewModel.getSelectedOrCurrentLineText()
+        if (textToCopy.isNotEmpty()) {
+            clipboard?.setPrimaryClip(ClipData.newPlainClip("code", textToCopy))
+            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun cutToClipboard() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val cutText = viewModel.cutSelectedOrCurrentLineText()
+        if (cutText.isNotEmpty()) {
+            clipboard?.setPrimaryClip(ClipData.newPlainClip("code", cutText))
+            Toast.makeText(context, "Cut to clipboard", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun pasteFromClipboard() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val item = clipboard?.primaryClip?.getItemAt(0)
+        val pasted = item?.coerceToText(context)?.toString() ?: ""
+        if (pasted.isNotEmpty()) {
+            viewModel.insertTextAtCursor(pasted)
+        } else {
+            Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // ── SAF: Open File ───────────────────────────────────────────────────────
     val openDocumentLauncher = rememberLauncherForActivityResult(
@@ -151,171 +186,137 @@ fun CPhoneApp(
     }
 
     val isDark = settings.isDarkMode
+    val palette = remember(settings.editorTheme, isDark) {
+        SyntaxHighlighter.resolvePalette(settings.editorTheme, isDark)
+    }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .displayCutoutPadding()
-            ) {
-                val subtitleText = when {
-                    activeTab.uri == null && activeTab.isModified -> "New file • Modified"
-                    activeTab.uri == null -> "New file"
-                    activeTab.isModified -> "${activeTab.uri.lastPathSegment ?: activeTab.fileName} • Modified"
-                    else -> activeTab.uri.path ?: "Saved file"
-                }
-                TopNavigationBar(
-                    fileName = activeTab.fileName,
-                    subtitle = subtitleText,
-                    language = activeTab.language,
-                    isDarkMode = isDark,
-                    themeId = settings.editorTheme,
-                    isRunnable = SupportedLanguage.isRunnable(activeTab.fileName) || activeTab.language.isRunnable,
-                    isZenMode = isZenMode,
-                    bugCount = bugCount,
-                    warningCount = warnCount,
-                    onPlayClick = { viewModel.setCodeRunnerOpen(true) },
-                    onTitleClick = { viewModel.setRenameDialogOpen(true) },
-                    onBugPillClick = { viewModel.setCodeTrailsOpen(true, initialTab = 0) },
-                    onCommandPaletteClick = { viewModel.setCommandPaletteOpen(true) },
-                    onToggleZenClick = { viewModel.toggleZenMode() },
-                    onFormatClick = {
-                        viewModel.formatCurrentCode()
-                        Toast.makeText(context, "Code formatted ✓", Toast.LENGTH_SHORT).show()
-                    },
-                    onSnippetsClick = { viewModel.setSnippetsOpen(true) },
-                    onGoToLineClick = { viewModel.setGoToLineOpen(true) },
-                    onHomeClick = { viewModel.setFileExplorerOpen(true) },
-                    onInfoClick = { viewModel.setInfoDialogOpen(true) },
-                    onThemeToggleClick = { viewModel.toggleTheme() },
-                    onAiAssistantClick = { viewModel.setAiAssistantOpen(true) },
-                    onNewFileClick = { viewModel.setNewFileDialogOpen(true) },
-                    onOpenFileClick = { openDocumentLauncher.launch(arrayOf("*/*")) },
-                    onFileExplorerClick = { viewModel.setFileExplorerOpen(true) },
-                    onSaveClick = { saveCurrentFile() },
-                    onSaveAsClick = { saveAsLauncher.launch(activeTab.fileName) },
-                    onFindClick = { viewModel.openSearch(false) },
-                    onReplaceClick = { viewModel.openSearch(true) },
-                    onSelectAllClick = { viewModel.selectAll() },
-                    onUndoClick = { viewModel.undo() },
-                    onRedoClick = { viewModel.redo() },
-                    onSettingsClick = { viewModel.setSettingsDialogOpen(true) },
-                    onAboutClick = { viewModel.setAboutDialogOpen(true) }
-                )
+    // Unified full-screen layout with zero white gap above the IME keyboard (fixes Image 3)
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(palette.editorBg)
+            .statusBarsPadding()
+            .displayCutoutPadding()
+            .imePadding()
+            .navigationBarsPadding()
+    ) {
+        val subtitleText = when {
+            activeTab.uri == null && activeTab.isModified -> "New file • Modified"
+            activeTab.uri == null -> "New file"
+            activeTab.isModified -> "${activeTab.uri.lastPathSegment ?: activeTab.fileName} • Modified"
+            else -> activeTab.uri.path ?: "Saved file"
+        }
 
-                // Hide tab bar & code trail bar in Zen Mode to give 90%+ screen area to code view
-                if (!isZenMode && settings.showTabBar && tabs.isNotEmpty()) {
-                    EditorTabBar(
-                        tabs = tabs,
-                        activeTabId = activeTabId,
-                        onTabSelected = { viewModel.selectTab(it) },
-                        onTabClosed = { id ->
-                            val tab = tabs.firstOrNull { it.id == id }
-                            if (tab?.isModified == true) tabToCloseId = id
-                            else viewModel.closeTab(id)
-                        },
-                        onNewTabClick = { viewModel.setNewFileDialogOpen(true) },
-                        isDarkMode = isDark,
-                        themeId = settings.editorTheme,
-                        showCodeTrail = settings.showCodeTrailBar,
-                        activeSymbol = activeSymbol,
-                        cursorLine = cursorLine,
-                        cursorColumn = cursorColumn,
-                        fontSizeSp = settings.fontSizeSp,
-                        canNavigateBack = trailIndex > 0,
-                        canNavigateForward = trailIndex in 0 until cursorTrail.lastIndex,
-                        onNavigateBack = { viewModel.navigateTrailBack() },
-                        onNavigateForward = { viewModel.navigateTrailForward() },
-                        onOpenOutline = { viewModel.setCodeTrailsOpen(true, initialTab = 1) },
-                        onOpenGoToLine = { viewModel.setGoToLineOpen(true) },
-                        onFontSizeDelta = { viewModel.adjustFontSize(it) }
-                    )
-                }
-            }
-        },
-        bottomBar = {
-            EditorBottomBar(
+        TopNavigationBar(
+            fileName = activeTab.fileName,
+            subtitle = subtitleText,
+            language = activeTab.language,
+            isDarkMode = isDark,
+            themeId = settings.editorTheme,
+            isRunnable = SupportedLanguage.isRunnable(activeTab.fileName) || activeTab.language.isRunnable,
+            isZenMode = isZenMode,
+            bugCount = bugCount,
+            warningCount = warnCount,
+            onPlayClick = { viewModel.setCodeRunnerOpen(true) },
+            onTitleClick = { viewModel.setRenameDialogOpen(true) },
+            onBugPillClick = { viewModel.setCodeTrailsOpen(true, initialTab = 0) },
+            onCommandPaletteClick = { viewModel.setCommandPaletteOpen(true) },
+            onToggleZenClick = { viewModel.toggleZenMode() },
+            onFormatClick = {
+                viewModel.formatCurrentCode()
+                Toast.makeText(context, "Code formatted ✓", Toast.LENGTH_SHORT).show()
+            },
+            onSnippetsClick = { viewModel.setSnippetsOpen(true) },
+            onGoToLineClick = { viewModel.setGoToLineOpen(true) },
+            onPasteClick = { pasteFromClipboard() },
+            onCopyClick = { copyToClipboard() },
+            onCutClick = { cutToClipboard() },
+            onHomeClick = { viewModel.setFileExplorerOpen(true) },
+            onInfoClick = { viewModel.setInfoDialogOpen(true) },
+            onThemeToggleClick = { viewModel.toggleTheme() },
+            onAiAssistantClick = { viewModel.setAiAssistantOpen(true) },
+            onNewFileClick = { viewModel.setNewFileDialogOpen(true) },
+            onOpenFileClick = { openDocumentLauncher.launch(arrayOf("*/*")) },
+            onFileExplorerClick = { viewModel.setFileExplorerOpen(true) },
+            onSaveClick = { saveCurrentFile() },
+            onSaveAsClick = { saveAsLauncher.launch(activeTab.fileName) },
+            onFindClick = { viewModel.openSearch(false) },
+            onReplaceClick = { viewModel.openSearch(true) },
+            onSelectAllClick = { viewModel.selectAll() },
+            onUndoClick = { viewModel.undo() },
+            onRedoClick = { viewModel.redo() },
+            onSettingsClick = { viewModel.setSettingsDialogOpen(true) },
+            onAboutClick = { viewModel.setAboutDialogOpen(true) }
+        )
+
+        if (!isZenMode && settings.showTabBar && tabs.isNotEmpty()) {
+            EditorTabBar(
+                tabs = tabs,
+                activeTabId = activeTabId,
+                onTabSelected = { viewModel.selectTab(it) },
+                onTabClosed = { id ->
+                    val tab = tabs.firstOrNull { it.id == id }
+                    if (tab?.isModified == true) tabToCloseId = id
+                    else viewModel.closeTab(id)
+                },
+                onNewTabClick = { viewModel.setNewFileDialogOpen(true) },
                 isDarkMode = isDark,
                 themeId = settings.editorTheme,
-                isSymbolsRevealed = isSymbolsRevealed,
-                onUndo = { viewModel.undo() },
-                onRedo = { viewModel.redo() },
-                onTab = { insertTab() },
-                onFind = { viewModel.openSearch(false) },
-                onSave = { saveCurrentFile() },
-                onEsc = {
-                    if (isSearchOpen) viewModel.closeSearch()
-                    else if (isSymbolsRevealed) isSymbolsRevealed = false
-                },
-                onCtrlShortcut = { viewModel.setCommandPaletteOpen(true) },
-                onMoveCursorLeft = { moveCursorLeft() },
-                onMoveCursorRight = { moveCursorRight() },
-                onMoveCursorUp = { viewModel.moveCursorUp() },
-                onMoveCursorDown = { viewModel.moveCursorDown() },
-                onMoveLineStart = { viewModel.moveCursorToLineStart() },
-                onMoveLineEnd = { viewModel.moveCursorToLineEnd() },
-                onToggleComment = { viewModel.toggleLineComment() },
-                onDuplicateLine = { viewModel.duplicateLine() },
-                onDeleteLine = { viewModel.deleteLine() },
-                onFormatCode = {
-                    viewModel.formatCurrentCode()
-                    Toast.makeText(context, "Formatted ✓", Toast.LENGTH_SHORT).show()
-                },
-                onOpenSnippets = { viewModel.setSnippetsOpen(true) },
-                onSelectAll = { viewModel.selectAll() },
-                onInsertText = { viewModel.insertTextAtCursor(it) },
-                modifier = Modifier.navigationBarsPadding()
+                showCodeTrail = settings.showCodeTrailBar,
+                activeSymbol = activeSymbol,
+                cursorLine = cursorLine,
+                cursorColumn = cursorColumn,
+                fontSizeSp = settings.fontSizeSp,
+                canNavigateBack = trailIndex > 0,
+                canNavigateForward = trailIndex in 0 until cursorTrail.lastIndex,
+                onNavigateBack = { viewModel.navigateTrailBack() },
+                onNavigateForward = { viewModel.navigateTrailForward() },
+                onOpenOutline = { viewModel.setCodeTrailsOpen(true, initialTab = 1) },
+                onOpenGoToLine = { viewModel.setGoToLineOpen(true) },
+                onFontSizeDelta = { viewModel.adjustFontSize(it) }
             )
         }
-    ) { innerPadding ->
+
+        if (isSearchOpen) {
+            SearchReplaceBar(
+                searchQuery = searchQuery,
+                onSearchQueryChange = { viewModel.onSearchQueryChanged(it) },
+                replaceQuery = replaceQuery,
+                onReplaceQueryChange = { viewModel.onReplaceQueryChanged(it) },
+                isReplaceMode = isReplaceMode,
+                matchCount = searchMatches.size,
+                currentMatchIndex = currentMatchIndex,
+                onFindNext = { viewModel.findNext() },
+                onFindPrevious = { viewModel.findPrevious() },
+                onReplace = { viewModel.replaceCurrent() },
+                onReplaceAll = { viewModel.replaceAll() },
+                onClose = { viewModel.closeSearch() },
+                isDarkMode = isDark
+            )
+        }
+
+        // Main Code Editor Canvas + Floating Bottom-Right '^' Circle Button
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .imePadding()
+                .weight(1f)
+                .fillMaxWidth()
         ) {
-            Column(
+            CodeEditorArea(
+                textFieldValue = activeTab.state,
+                onValueChange = { viewModel.onTextChanged(it) },
+                language = activeTab.language,
+                settings = settings,
+                diagnostics = diagnostics,
+                currentLine = cursorLine,
+                searchQuery = if (isSearchOpen) searchQuery else "",
+                onFontSizeCalibrated = { newSize ->
+                    viewModel.updateSettings(settings.copy(fontSizeSp = newSize))
+                },
+                onBugLineClicked = { viewModel.setCodeTrailsOpen(true, initialTab = 0) },
                 modifier = Modifier.fillMaxSize()
-            ) {
-                if (isSearchOpen) {
-                    SearchReplaceBar(
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = { viewModel.onSearchQueryChanged(it) },
-                        replaceQuery = replaceQuery,
-                        onReplaceQueryChange = { viewModel.onReplaceQueryChanged(it) },
-                        isReplaceMode = isReplaceMode,
-                        matchCount = searchMatches.size,
-                        currentMatchIndex = currentMatchIndex,
-                        onFindNext = { viewModel.findNext() },
-                        onFindPrevious = { viewModel.findPrevious() },
-                        onReplace = { viewModel.replaceCurrent() },
-                        onReplaceAll = { viewModel.replaceAll() },
-                        onClose = { viewModel.closeSearch() },
-                        isDarkMode = isDark
-                    )
-                }
+            )
 
-                CodeEditorArea(
-                    textFieldValue = activeTab.state,
-                    onValueChange = { viewModel.onTextChanged(it) },
-                    language = activeTab.language,
-                    settings = settings,
-                    diagnostics = diagnostics,
-                    currentLine = cursorLine,
-                    searchQuery = if (isSearchOpen) searchQuery else "",
-                    onFontSizeCalibrated = { newSize ->
-                        viewModel.updateSettings(settings.copy(fontSizeSp = newSize))
-                    },
-                    onBugLineClicked = { viewModel.setCodeTrailsOpen(true, initialTab = 0) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            // ── Floating Circular '^' / 'v' Button at Bottom-Right (Circled in Blue in Screenshot) ──
+            // Floating Circular '^' / 'v' Button at Bottom-Right
             // Default state is hidden; tapping reveals {}, [], (), etc. Tapping again hides them.
             Surface(
                 onClick = { isSymbolsRevealed = !isSymbolsRevealed },
@@ -346,188 +347,221 @@ fun CPhoneApp(
             }
         }
 
-        // ── Overlays & Dialogs ───────────────────────────────────────────────
+        // Bottom Bar sits flush above the keyboard with zero gap
+        EditorBottomBar(
+            isDarkMode = isDark,
+            themeId = settings.editorTheme,
+            isSymbolsRevealed = isSymbolsRevealed,
+            onUndo = { viewModel.undo() },
+            onRedo = { viewModel.redo() },
+            onTab = { insertTab() },
+            onFind = { viewModel.openSearch(false) },
+            onSave = { saveCurrentFile() },
+            onEsc = {
+                if (isSearchOpen) viewModel.closeSearch()
+                else if (isSymbolsRevealed) isSymbolsRevealed = false
+            },
+            onCtrlShortcut = { viewModel.setCommandPaletteOpen(true) },
+            onMoveCursorLeft = { moveCursorLeft() },
+            onMoveCursorRight = { moveCursorRight() },
+            onMoveCursorUp = { viewModel.moveCursorUp() },
+            onMoveCursorDown = { viewModel.moveCursorDown() },
+            onMoveLineStart = { viewModel.moveCursorToLineStart() },
+            onMoveLineEnd = { viewModel.moveCursorToLineEnd() },
+            onToggleComment = { viewModel.toggleLineComment() },
+            onDuplicateLine = { viewModel.duplicateLine() },
+            onDeleteLine = { viewModel.deleteLine() },
+            onFormatCode = {
+                viewModel.formatCurrentCode()
+                Toast.makeText(context, "Formatted ✓", Toast.LENGTH_SHORT).show()
+            },
+            onOpenSnippets = { viewModel.setSnippetsOpen(true) },
+            onSelectAll = { viewModel.selectAll() },
+            onInsertText = { viewModel.insertTextAtCursor(it) }
+        )
+    }
 
-        if (isCommandPaletteOpen) {
-            CommandPaletteDialog(
-                isDarkMode = isDark,
-                onRunCode = { viewModel.setCodeRunnerOpen(true) },
-                onFormatCode = {
-                    viewModel.formatCurrentCode()
-                    Toast.makeText(context, "Code formatted ✓", Toast.LENGTH_SHORT).show()
-                },
-                onToggleComment = { viewModel.toggleLineComment() },
-                onDuplicateLine = { viewModel.duplicateLine() },
-                onDeleteLine = { viewModel.deleteLine() },
-                onMoveLineUp = { viewModel.moveLineUp() },
-                onMoveLineDown = { viewModel.moveLineDown() },
-                onOpenGoToLine = { viewModel.setGoToLineOpen(true) },
-                onOpenSnippets = { viewModel.setSnippetsOpen(true) },
-                onOpenBugs = { viewModel.setCodeTrailsOpen(true, initialTab = 0) },
-                onOpenOutline = { viewModel.setCodeTrailsOpen(true, initialTab = 1) },
-                onOpenTrailHistory = { viewModel.setCodeTrailsOpen(true, initialTab = 2) },
-                onSortLinesAsc = { viewModel.sortLines(true) },
-                onSortLinesDesc = { viewModel.sortLines(false) },
-                onTrimWhitespace = {
-                    viewModel.trimTrailingWhitespace()
-                    Toast.makeText(context, "Trimmed trailing whitespace ✓", Toast.LENGTH_SHORT).show()
-                },
-                onToggleZenMode = { viewModel.toggleZenMode() },
-                onToggleWordWrap = {
-                    viewModel.updateSettings(settings.copy(wordWrap = !settings.wordWrap))
-                },
-                onSelectTheme = { viewModel.setEditorTheme(it) },
-                onSelectLanguage = { viewModel.changeLanguage(it) },
-                onDismiss = { viewModel.setCommandPaletteOpen(false) }
-            )
-        }
+    // ── Overlays & Dialogs ───────────────────────────────────────────────
 
-        if (isCodeTrailsOpen) {
-            CodeTrailsSheet(
-                initialTab = codeTrailsInitialTab,
-                fileName = activeTab.fileName,
-                diagnostics = diagnostics,
-                symbols = symbols,
-                cursorTrail = cursorTrail,
-                canGoBack = trailIndex > 0,
-                canGoForward = trailIndex in 0 until cursorTrail.lastIndex,
-                onNavigateBack = { viewModel.navigateTrailBack() },
-                onNavigateForward = { viewModel.navigateTrailForward() },
-                onJumpToLine = { line, col -> viewModel.goToLine(line, col) },
-                onFormatCode = {
-                    viewModel.formatCurrentCode()
-                    Toast.makeText(context, "Auto-formatted ✓", Toast.LENGTH_SHORT).show()
-                },
-                isDarkMode = isDark,
-                onDismiss = { viewModel.setCodeTrailsOpen(false) }
-            )
-        }
+    if (isCommandPaletteOpen) {
+        CommandPaletteDialog(
+            isDarkMode = isDark,
+            onRunCode = { viewModel.setCodeRunnerOpen(true) },
+            onFormatCode = {
+                viewModel.formatCurrentCode()
+                Toast.makeText(context, "Code formatted ✓", Toast.LENGTH_SHORT).show()
+            },
+            onToggleComment = { viewModel.toggleLineComment() },
+            onDuplicateLine = { viewModel.duplicateLine() },
+            onDeleteLine = { viewModel.deleteLine() },
+            onMoveLineUp = { viewModel.moveLineUp() },
+            onMoveLineDown = { viewModel.moveLineDown() },
+            onOpenGoToLine = { viewModel.setGoToLineOpen(true) },
+            onOpenSnippets = { viewModel.setSnippetsOpen(true) },
+            onOpenBugs = { viewModel.setCodeTrailsOpen(true, initialTab = 0) },
+            onOpenOutline = { viewModel.setCodeTrailsOpen(true, initialTab = 1) },
+            onOpenTrailHistory = { viewModel.setCodeTrailsOpen(true, initialTab = 2) },
+            onSortLinesAsc = { viewModel.sortLines(true) },
+            onSortLinesDesc = { viewModel.sortLines(false) },
+            onTrimWhitespace = {
+                viewModel.trimTrailingWhitespace()
+                Toast.makeText(context, "Trimmed trailing whitespace ✓", Toast.LENGTH_SHORT).show()
+            },
+            onToggleZenMode = { viewModel.toggleZenMode() },
+            onToggleWordWrap = {
+                viewModel.updateSettings(settings.copy(wordWrap = !settings.wordWrap))
+            },
+            onSelectTheme = { viewModel.setEditorTheme(it) },
+            onSelectLanguage = { viewModel.changeLanguage(it) },
+            onDismiss = { viewModel.setCommandPaletteOpen(false) }
+        )
+    }
 
-        if (isSnippetsOpen) {
-            SnippetsDialog(
-                language = activeTab.language,
-                isDarkMode = isDark,
-                onInsertSnippet = { viewModel.insertTextAtCursor(it) },
-                onDismiss = { viewModel.setSnippetsOpen(false) }
-            )
-        }
+    if (isCodeTrailsOpen) {
+        CodeTrailsSheet(
+            initialTab = codeTrailsInitialTab,
+            fileName = activeTab.fileName,
+            diagnostics = diagnostics,
+            symbols = symbols,
+            cursorTrail = cursorTrail,
+            canGoBack = trailIndex > 0,
+            canGoForward = trailIndex in 0 until cursorTrail.lastIndex,
+            onNavigateBack = { viewModel.navigateTrailBack() },
+            onNavigateForward = { viewModel.navigateTrailForward() },
+            onJumpToLine = { line, col -> viewModel.goToLine(line, col) },
+            onFormatCode = {
+                viewModel.formatCurrentCode()
+                Toast.makeText(context, "Auto-formatted ✓", Toast.LENGTH_SHORT).show()
+            },
+            isDarkMode = isDark,
+            onDismiss = { viewModel.setCodeTrailsOpen(false) }
+        )
+    }
 
-        if (isGoToLineOpen) {
-            val totalLines = activeTab.state.text.count { it == '\n' } + 1
-            GoToLineDialog(
-                currentLine = cursorLine,
-                totalLines = totalLines,
-                onConfirm = { line, col -> viewModel.goToLine(line, col) },
-                onDismiss = { viewModel.setGoToLineOpen(false) }
-            )
-        }
+    if (isSnippetsOpen) {
+        SnippetsDialog(
+            language = activeTab.language,
+            isDarkMode = isDark,
+            onInsertSnippet = { viewModel.insertTextAtCursor(it) },
+            onDismiss = { viewModel.setSnippetsOpen(false) }
+        )
+    }
 
-        if (isFileExplorerOpen) {
-            val startDir = Environment.getExternalStorageDirectory() ?: File("/sdcard")
-            FileExplorerSheet(
-                initialDirectory = startDir,
-                onFileSelected = { file ->
-                    try {
-                        val content = file.readText(Charsets.UTF_8)
-                        viewModel.openNewTab(file.name, content, Uri.fromFile(file))
-                        Toast.makeText(context, "Opened: ${file.name}", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Cannot open: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
-                },
-                onDismiss = { viewModel.setFileExplorerOpen(false) },
-                isDarkMode = isDark
-            )
-        }
+    if (isGoToLineOpen) {
+        val totalLines = activeTab.state.text.count { it == '\n' } + 1
+        GoToLineDialog(
+            currentLine = cursorLine,
+            totalLines = totalLines,
+            onConfirm = { line, col -> viewModel.goToLine(line, col) },
+            onDismiss = { viewModel.setGoToLineOpen(false) }
+        )
+    }
 
-        if (isAiAssistantOpen) {
-            val sel = activeTab.state.selection
-            val selectedCode = if (sel.collapsed) "" else activeTab.state.text.substring(sel.min, sel.max)
-            AiAssistantDialog(
-                selectedCode = selectedCode,
-                fullCode = activeTab.state.text,
-                settings = settings,
-                onSaveSettings = { viewModel.updateSettings(it) },
-                onInsertCode = { viewModel.insertTextAtCursor(it) },
-                onReplaceFile = { viewModel.replaceEntireFile(it) },
-                onDismiss = { viewModel.setAiAssistantOpen(false) }
-            )
-        }
-
-        if (isInfoDialogOpen) {
-            val t = activeTab.state.text
-            InfoDialog(
-                fileName = activeTab.fileName,
-                filePath = activeTab.uri?.path ?: "(unsaved / in-session)",
-                language = activeTab.language,
-                lineCount = if (t.isEmpty()) 1 else t.count { it == '\n' } + 1,
-                charCount = t.length,
-                byteSize = t.toByteArray().size,
-                onDismiss = { viewModel.setInfoDialogOpen(false) }
-            )
-        }
-
-        if (isSettingsDialogOpen) {
-            SettingsDialog(
-                settings = settings,
-                onSettingsChanged = { viewModel.updateSettings(it) },
-                onOpenAiSettings = { viewModel.setAiAssistantOpen(true) },
-                onDismiss = { viewModel.setSettingsDialogOpen(false) }
-            )
-        }
-
-        if (isNewFileDialogOpen) {
-            NewFileDialog(
-                onConfirm = { name, useStarter ->
-                    viewModel.openNewTab(name, "", useStarterIfBlank = useStarter)
-                    viewModel.setNewFileDialogOpen(false)
-                },
-                onDismiss = { viewModel.setNewFileDialogOpen(false) }
-            )
-        }
-
-        if (isAboutDialogOpen) {
-            AboutDialog(onDismiss = { viewModel.setAboutDialogOpen(false) })
-        }
-
-        if (isCodeRunnerOpen) {
-            CodeRunnerDialog(
-                fileName = activeTab.fileName,
-                code = activeTab.state.text,
-                language = activeTab.language,
-                openTabs = tabs,
-                isDarkMode = isDark,
-                onJumpToLine = { errLine -> viewModel.goToLine(errLine, 1) },
-                onDismiss = { viewModel.setCodeRunnerOpen(false) }
-            )
-        }
-
-        if (isRenameDialogOpen) {
-            RenameFileDialog(
-                currentName = activeTab.fileName,
-                onConfirm = { newName ->
-                    viewModel.renameCurrentTab(newName)
-                    viewModel.setRenameDialogOpen(false)
-                },
-                onDismiss = { viewModel.setRenameDialogOpen(false) }
-            )
-        }
-
-        tabToCloseId?.let { id ->
-            val tab = tabs.firstOrNull { it.id == id }
-            AlertDialog(
-                onDismissRequest = { tabToCloseId = null },
-                title = { Text("Unsaved Changes") },
-                text = { Text("'${tab?.fileName}' has unsaved changes. Close anyway?") },
-                confirmButton = {
-                    TextButton(onClick = { viewModel.closeTab(id); tabToCloseId = null }) {
-                        Text("Discard & Close", color = MaterialTheme.colorScheme.error)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { tabToCloseId = null }) { Text("Cancel") }
+    if (isFileExplorerOpen) {
+        val startDir = Environment.getExternalStorageDirectory() ?: File("/sdcard")
+        FileExplorerSheet(
+            initialDirectory = startDir,
+            onFileSelected = { file ->
+                try {
+                    val content = file.readText(Charsets.UTF_8)
+                    viewModel.openNewTab(file.name, content, Uri.fromFile(file))
+                    Toast.makeText(context, "Opened: ${file.name}", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Cannot open: ${e.message}", Toast.LENGTH_LONG).show()
                 }
-            )
-        }
+            },
+            onDismiss = { viewModel.setFileExplorerOpen(false) },
+            isDarkMode = isDark
+        )
+    }
+
+    if (isAiAssistantOpen) {
+        val sel = activeTab.state.selection
+        val selectedCode = if (sel.collapsed) "" else activeTab.state.text.substring(sel.min, sel.max)
+        AiAssistantDialog(
+            selectedCode = selectedCode,
+            fullCode = activeTab.state.text,
+            settings = settings,
+            onSaveSettings = { viewModel.updateSettings(it) },
+            onInsertCode = { viewModel.insertTextAtCursor(it) },
+            onReplaceFile = { viewModel.replaceEntireFile(it) },
+            onDismiss = { viewModel.setAiAssistantOpen(false) }
+        )
+    }
+
+    if (isInfoDialogOpen) {
+        val t = activeTab.state.text
+        InfoDialog(
+            fileName = activeTab.fileName,
+            filePath = activeTab.uri?.path ?: "(unsaved / in-session)",
+            language = activeTab.language,
+            lineCount = if (t.isEmpty()) 1 else t.count { it == '\n' } + 1,
+            charCount = t.length,
+            byteSize = t.toByteArray().size,
+            onDismiss = { viewModel.setInfoDialogOpen(false) }
+        )
+    }
+
+    if (isSettingsDialogOpen) {
+        SettingsDialog(
+            settings = settings,
+            onSettingsChanged = { viewModel.updateSettings(it) },
+            onOpenAiSettings = { viewModel.setAiAssistantOpen(true) },
+            onDismiss = { viewModel.setSettingsDialogOpen(false) }
+        )
+    }
+
+    if (isNewFileDialogOpen) {
+        NewFileDialog(
+            onConfirm = { name, useStarter ->
+                viewModel.openNewTab(name, "", useStarterIfBlank = useStarter)
+                viewModel.setNewFileDialogOpen(false)
+            },
+            onDismiss = { viewModel.setNewFileDialogOpen(false) }
+        )
+    }
+
+    if (isAboutDialogOpen) {
+        AboutDialog(onDismiss = { viewModel.setAboutDialogOpen(false) })
+    }
+
+    if (isCodeRunnerOpen) {
+        CodeRunnerDialog(
+            fileName = activeTab.fileName,
+            code = activeTab.state.text,
+            language = activeTab.language,
+            openTabs = tabs,
+            isDarkMode = isDark,
+            onJumpToLine = { errLine -> viewModel.goToLine(errLine, 1) },
+            onDismiss = { viewModel.setCodeRunnerOpen(false) }
+        )
+    }
+
+    if (isRenameDialogOpen) {
+        RenameFileDialog(
+            currentName = activeTab.fileName,
+            onConfirm = { newName ->
+                viewModel.renameCurrentTab(newName)
+                viewModel.setRenameDialogOpen(false)
+            },
+            onDismiss = { viewModel.setRenameDialogOpen(false) }
+        )
+    }
+
+    tabToCloseId?.let { id ->
+        val tab = tabs.firstOrNull { it.id == id }
+        AlertDialog(
+            onDismissRequest = { tabToCloseId = null },
+            title = { Text("Unsaved Changes") },
+            text = { Text("'${tab?.fileName}' has unsaved changes. Close anyway?") },
+            confirmButton = {
+                TextButton(onClick = { viewModel.closeTab(id); tabToCloseId = null }) {
+                    Text("Discard & Close", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { tabToCloseId = null }) { Text("Cancel") }
+            }
+        )
     }
 }

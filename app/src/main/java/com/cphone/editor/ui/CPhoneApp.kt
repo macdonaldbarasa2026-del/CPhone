@@ -86,7 +86,7 @@ fun CPhoneApp(
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         val textToCopy = viewModel.getSelectedOrCurrentLineText()
         if (textToCopy.isNotEmpty()) {
-            clipboard?.setPrimaryClip(ClipData.newPlainClip("code", textToCopy))
+            clipboard?.setPrimaryClip(ClipData.newPlainText("code", textToCopy))
             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
         }
     }
@@ -95,7 +95,7 @@ fun CPhoneApp(
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         val cutText = viewModel.cutSelectedOrCurrentLineText()
         if (cutText.isNotEmpty()) {
-            clipboard?.setPrimaryClip(ClipData.newPlainClip("code", cutText))
+            clipboard?.setPrimaryClip(ClipData.newPlainText("code", cutText))
             Toast.makeText(context, "Cut to clipboard", Toast.LENGTH_SHORT).show()
         }
     }
@@ -207,13 +207,17 @@ fun CPhoneApp(
             else -> activeTab.uri.path ?: "Saved file"
         }
 
+        val isRunnable = remember(activeTab.fileName, activeTab.language, activeTab.state.text) {
+            SupportedLanguage.isRunnable(activeTab.fileName, activeTab.state.text) || activeTab.language.isRunnable
+        }
+
         TopNavigationBar(
             fileName = activeTab.fileName,
             subtitle = subtitleText,
             language = activeTab.language,
             isDarkMode = isDark,
             themeId = settings.editorTheme,
-            isRunnable = SupportedLanguage.isRunnable(activeTab.fileName) || activeTab.language.isRunnable,
+            isRunnable = isRunnable,
             isZenMode = isZenMode,
             bugCount = bugCount,
             warningCount = warnCount,
@@ -351,7 +355,9 @@ fun CPhoneApp(
         EditorBottomBar(
             isDarkMode = isDark,
             themeId = settings.editorTheme,
+            isRunnable = isRunnable,
             isSymbolsRevealed = isSymbolsRevealed,
+            onPlay = { viewModel.setCodeRunnerOpen(true) },
             onUndo = { viewModel.undo() },
             onRedo = { viewModel.redo() },
             onTab = { insertTab() },

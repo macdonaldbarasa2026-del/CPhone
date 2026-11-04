@@ -150,19 +150,26 @@ fun TopNavigationBar(
                 }
             }
 
-            // Play / Run button when runnable
+            // Play / Run / Quick Compile button when runnable
             if (isRunnable) {
-                IconButton(
-                    onClick = onPlayClick,
-                    modifier = Modifier.size(38.dp)
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFF4CAF50).copy(alpha = 0.16f),
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Run / Preview",
-                        tint = Color(0xFF4CAF50),
-                        modifier = Modifier.size(25.dp)
-                    )
+                    IconButton(
+                        onClick = onPlayClick,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Run / Quick Compile",
+                            tint = Color(0xFF4CAF50),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
+                Spacer(modifier = Modifier.width(4.dp))
             }
 
             // Pencil / Quick Edit Menu (Paste, Copy, Cut, Select All, Go to Line, Format)

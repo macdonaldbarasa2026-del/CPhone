@@ -40,7 +40,9 @@ import com.cphone.editor.syntax.SyntaxHighlighter
 fun EditorBottomBar(
     isDarkMode: Boolean,
     themeId: String = "one_dark",
+    isRunnable: Boolean = false,
     isSymbolsRevealed: Boolean = false,
+    onPlay: () -> Unit = {},
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onTab: () -> Unit,
@@ -269,6 +271,36 @@ fun EditorBottomBar(
                     tint = textColor,
                     onClick = onSave
                 )
+
+                // ▶ Quick Compile / Run button when runnable
+                if (isRunnable) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF2E7D32),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clickable { onPlay() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Run / Quick Compile",
+                                tint = Color.White,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "Run",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
 
                 // ESC button
                 BottomBarTextAction(

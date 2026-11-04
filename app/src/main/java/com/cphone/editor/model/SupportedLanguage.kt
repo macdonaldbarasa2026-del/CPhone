@@ -41,38 +41,73 @@ enum class SupportedLanguage(
             return raw.trim().replace("\"", "").replace("'", "").trim()
         }
 
-        fun detect(fileName: String): SupportedLanguage {
+        fun detect(fileName: String, code: String = ""): SupportedLanguage {
             val cleaned = sanitizeFileName(fileName).removeSuffix("●").trim()
             val ext = cleaned.substringAfterLast('.', "").lowercase().trim()
-            if (ext.isEmpty()) return PLAINTEXT
-            entries.firstOrNull { it.extensions.contains(ext) }?.let { return it }
-            // Fuzzy prefix match for common extensions (e.g. htm*, py*, js*, ts*, css*, kt*)
-            return when {
-                ext.startsWith("htm") -> HTML
-                ext.startsWith("py") -> PYTHON
-                ext.startsWith("js") && ext != "json" -> JAVASCRIPT
-                ext.startsWith("ts") -> TYPESCRIPT
-                ext.startsWith("css") || ext.startsWith("scss") -> CSS
-                ext.startsWith("json") -> JSON
-                ext.startsWith("md") || ext.startsWith("mark") -> MARKDOWN
-                ext.startsWith("kt") -> KOTLIN
-                ext.startsWith("jav") -> JAVA
-                ext.startsWith("cpp") || ext.startsWith("cxx") -> CPP
-                ext.startsWith("bat") || ext.startsWith("cmd") -> BATCH
-                ext.startsWith("sh") || ext.startsWith("bash") -> SHELL
-                ext.startsWith("yml") || ext.startsWith("yaml") -> YAML
-                ext.startsWith("xml") || ext.startsWith("svg") -> XML
-                ext.startsWith("sql") -> SQL
-                ext.startsWith("php") -> PHP
-                ext.startsWith("rs") -> RUST
-                ext.startsWith("go") -> GO
-                ext.startsWith("dart") -> DART
-                else -> PLAINTEXT
+            if (ext.isNotEmpty() && ext != "txt") {
+                entries.firstOrNull { it.extensions.contains(ext) }?.let { return it }
+                val detected = when {
+                    ext.startsWith("htm") -> HTML
+                    ext.startsWith("py") -> PYTHON
+                    ext.startsWith("js") && ext != "json" -> JAVASCRIPT
+                    ext.startsWith("ts") -> TYPESCRIPT
+                    ext.startsWith("css") || ext.startsWith("scss") -> CSS
+                    ext.startsWith("json") -> JSON
+                    ext.startsWith("md") || ext.startsWith("mark") -> MARKDOWN
+                    ext.startsWith("kt") -> KOTLIN
+                    ext.startsWith("jav") -> JAVA
+                    ext.startsWith("cpp") || ext.startsWith("cxx") -> CPP
+                    ext.startsWith("bat") || ext.startsWith("cmd") -> BATCH
+                    ext.startsWith("sh") || ext.startsWith("bash") -> SHELL
+                    ext.startsWith("yml") || ext.startsWith("yaml") -> YAML
+                    ext.startsWith("xml") || ext.startsWith("svg") -> XML
+                    ext.startsWith("sql") -> SQL
+                    ext.startsWith("php") -> PHP
+                    ext.startsWith("rs") -> RUST
+                    ext.startsWith("go") -> GO
+                    ext.startsWith("dart") -> DART
+                    else -> null
+                }
+                if (detected != null) return detected
             }
+
+            // Inspect code content for quick auto-detection if extension is absent or .txt
+            if (code.isNotEmpty()) {
+                val trimmed = code.trim()
+                return when {
+                    trimmed.startsWith("<!DOCTYPE", ignoreCase = true) ||
+                    trimmed.startsWith("<html", ignoreCase = true) ||
+                    trimmed.contains("<head", ignoreCase = true) ||
+                    trimmed.contains("<body", ignoreCase = true) ||
+                    trimmed.contains("<script", ignoreCase = true) ||
+                    trimmed.contains("</", ignoreCase = true) -> HTML
+
+                    trimmed.startsWith("<?xml", ignoreCase = true) ||
+                    trimmed.startsWith("<svg", ignoreCase = true) -> XML
+
+                    trimmed.startsWith("import ") || trimmed.startsWith("from ") ||
+                    trimmed.contains("def ") || trimmed.contains("print(") ||
+                    trimmed.contains("if __name__ ==") -> PYTHON
+
+                    trimmed.contains("console.log") || trimmed.contains("function ") ||
+                    trimmed.contains("const ") || trimmed.contains("let ") ||
+                    trimmed.contains("var ") -> JAVASCRIPT
+
+                    trimmed.startsWith("{") || trimmed.startsWith("[") -> {
+                        if (trimmed.endsWith("}") || trimmed.endsWith("]")) JSON else PLAINTEXT
+                    }
+
+                    trimmed.startsWith("# ") || trimmed.startsWith("## ") || trimmed.startsWith("```") -> MARKDOWN
+
+                    else -> PLAINTEXT
+                }
+            }
+
+            return PLAINTEXT
         }
 
-        fun isRunnable(fileName: String): Boolean {
-            return detect(fileName).isRunnable
+        fun isRunnable(fileName: String, code: String = ""): Boolean {
+            return detect(fileName, code).isRunnable
         }
 
         fun starterTemplate(fileName: String): String {

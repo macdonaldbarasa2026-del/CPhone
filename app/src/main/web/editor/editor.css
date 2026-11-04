@@ -1,0 +1,51 @@
+html,
+body,
+#editor {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: none;
+}
+
+.cm-editor {
+  height: 100%;
+  outline: none !important;
+}
+
+.cm-scroller {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cm-content {
+  min-height: 100%;
+  caret-color: var(--cm-cursor);
+}
+
+.cm-gutters {
+  border-right: 1px solid var(--cm-border);
+  user-select: none;
+}
+
+.cm-activeLineGutter,
+.cm-activeLine {
+  background: var(--cm-active-line);
+}
+
+.cm-selectionBackground,
+.cm-focused .cm-selectionBackground {
+  background: var(--cm-selection) !important;
+}
+
+.cm-cursor {
+  border-left-color: var(--cm-cursor) !important;
+}
+
+.cm-tooltip {
+  border: 1px solid var(--cm-border);
+}

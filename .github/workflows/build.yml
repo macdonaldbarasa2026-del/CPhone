@@ -24,6 +24,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -40,6 +46,17 @@ jobs:
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Verify CodeMirror assets in APK
+        run: |
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk"
+          unzip -Z1 "$apk" | grep -Fxq "assets/editor/editor.js"
+          unzip -Z1 "$apk" | grep -Fxq "assets/editor/editor.css"
+          unzip -Z1 "$apk" | grep -Fxq "assets/editor/index.html"
+          bundle_size=$(unzip -p "$apk" assets/editor/editor.js | wc -c)
+          test "$bundle_size" -gt 100000
+          echo "Verified bundled CodeMirror assets in APK ($bundle_size bytes)"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

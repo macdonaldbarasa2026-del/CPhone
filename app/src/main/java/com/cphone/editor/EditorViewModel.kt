@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.cphone.editor.model.EditorSettings
 import com.cphone.editor.model.EditorTab
 import com.cphone.editor.model.RecentFile
@@ -16,6 +17,11 @@ import com.cphone.editor.tools.CodeAnalyzer
 import com.cphone.editor.tools.CodeDiagnostic
 import com.cphone.editor.tools.CodeSymbol
 import com.cphone.editor.tools.CursorTrailEntry
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -255,6 +261,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     val trailIndex: StateFlow<Int> = _trailIndex.asStateFlow()
 
     private var isNavigatingTrail = false
+    private var analysisJob: Job? = null
 
     init {
         refreshAnalysisForCurrentTab()
@@ -264,39 +271,63 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val tab = currentTab
         val text = tab.state.text
         val pos = tab.state.selection.start.coerceIn(0, text.length)
-        val beforeCursor = text.substring(0, pos)
-        val line = beforeCursor.count { it == '\n' } + 1
-        val lastNl = beforeCursor.lastIndexOf('\n')
-        val col = if (lastNl == -1) pos + 1 else pos - lastNl
+        val shouldRecordTrail = recordTrailIfJump && !isNavigatingTrail
+        analysisJob?.cancel()
+        analysisJob = viewModelScope.launch {
+            delay(80)
+            val analysis = withContext(Dispatchers.Default) {
+                val beforeCursor = text.substring(0, pos)
+                val line = beforeCursor.count { it == '\n' } + 1
+                val lastNl = beforeCursor.lastIndexOf('\n')
+                val column = if (lastNl == -1) pos + 1 else pos - lastNl
+                val symbols = CodeAnalyzer.extractSymbols(text, tab.language)
+                val activeSymbol = CodeAnalyzer.findActiveSymbol(symbols, line)
+                val diagnostics = CodeAnalyzer.analyzeDiagnostics(text, tab.language)
+                CurrentDocumentAnalysis(line, column, symbols, activeSymbol, diagnostics)
+            }
 
-        val prevLine = _cursorLine.value
-        _cursorLine.value = line
-        _cursorColumn.value = col
+            val latestTab = currentTab
+            if (latestTab.id != tab.id ||
+                latestTab.state.text != text ||
+                latestTab.state.selection.start != pos
+            ) return@launch
 
-        val syms = CodeAnalyzer.extractSymbols(text, tab.language)
-        _symbols.value = syms
-        val activeSym = CodeAnalyzer.findActiveSymbol(syms, line)
-        _activeSymbol.value = activeSym
+            _cursorLine.value = analysis.line
+            _cursorColumn.value = analysis.column
+            _symbols.value = analysis.symbols
+            _activeSymbol.value = analysis.activeSymbol
+            _diagnostics.value = analysis.diagnostics
 
-        _diagnostics.value = CodeAnalyzer.analyzeDiagnostics(text, tab.language)
-
-        if (recordTrailIfJump && !isNavigatingTrail) {
-            val currentList = _cursorTrail.value
-            val lastEntry = currentList.lastOrNull()
-            if (lastEntry == null || lastEntry.tabId != tab.id || abs(lastEntry.line - line) >= 4) {
-                val entry = CursorTrailEntry(
-                    tabId = tab.id,
-                    fileName = tab.fileName,
-                    line = line,
-                    column = col,
-                    symbolName = activeSym?.name ?: "Ln $line"
-                )
-                val trimmed = (currentList.take((_trailIndex.value + 1).coerceAtLeast(0)) + entry).takeLast(40)
-                _cursorTrail.value = trimmed
-                _trailIndex.value = trimmed.lastIndex
+            if (shouldRecordTrail) {
+                val currentList = _cursorTrail.value
+                val lastEntry = currentList.lastOrNull()
+                if (lastEntry == null || lastEntry.tabId != tab.id ||
+                    abs(lastEntry.line - analysis.line) >= 4
+                ) {
+                    val entry = CursorTrailEntry(
+                        tabId = tab.id,
+                        fileName = tab.fileName,
+                        line = analysis.line,
+                        column = analysis.column,
+                        symbolName = analysis.activeSymbol?.name ?: "Ln ${analysis.line}"
+                    )
+                    val trimmed = (
+                        currentList.take((_trailIndex.value + 1).coerceAtLeast(0)) + entry
+                    ).takeLast(40)
+                    _cursorTrail.value = trimmed
+                    _trailIndex.value = trimmed.lastIndex
+                }
             }
         }
     }
+
+    private data class CurrentDocumentAnalysis(
+        val line: Int,
+        val column: Int,
+        val symbols: List<CodeSymbol>,
+        val activeSymbol: CodeSymbol?,
+        val diagnostics: List<CodeDiagnostic>
+    )
 
     fun navigateTrailBack() {
         val idx = _trailIndex.value
